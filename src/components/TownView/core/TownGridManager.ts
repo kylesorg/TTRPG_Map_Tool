@@ -1,6 +1,7 @@
 import * as PIXI from 'pixi.js';
 import { TownViewportManager, type TownViewportConfig } from './TownViewportManager';
 import { TownLayerManager, type TownLayerContainers, type TownLayerManagerConfig } from './TownLayerManager';
+import { TownEventHandler, type TownEventHandlerConfig, type TownToolMode } from './TownEventHandler';
 import type { TownData, TownSticker } from '../../../types/townTypes';
 import type { TownMaterial } from '../../../types/mapTypes';
 
@@ -21,20 +22,15 @@ export class TownGridManager {
     // Managers
     private viewportManager: TownViewportManager;
     private layerManager: TownLayerManager;
+    private eventHandler: TownEventHandler;
     private cleanupViewport: (() => void) | null = null;
+    private cleanupEvents: (() => void) | null = null;
 
     // State
     private townData: TownData | null = null;
     private materials: TownMaterial[] = [];
     private stickers: TownSticker[] = [];
     private cellTexture: PIXI.Texture | null = null;
-
-    // Paint state
-    private isPainting = false;
-    private paintedCellsBatch = new Map<string, { x: number; y: number; material: string }>();
-    private lastPaintedCell: { x: number; y: number } | null = null;
-    private selectedMaterial: TownMaterial | null = null;
-    private currentTool: 'select' | 'paint' = 'select';
 
     // Performance tracking
     private lastRenderTime = 0;
@@ -61,13 +57,40 @@ export class TownGridManager {
 
         this.layerManager = new TownLayerManager(config.layers, this.containers, app);
 
+        // Initialize event handler
+        const eventConfig: TownEventHandlerConfig = {
+            cellSize: config.cellSize,
+            onCellClick: (cell) => {
+                if (config.onCellClick) {
+                    config.onCellClick(cell);
+                }
+            },
+            onPaintCellBatch: (batch) => {
+                if (config.onCellPaint) {
+                    config.onCellPaint(batch);
+                }
+                // Update cell visuals immediately
+                this.updateCellVisuals(batch);
+            },
+            onPaintComplete: (lastCell) => {
+                // Select the last painted cell
+                if (config.onCellClick) {
+                    config.onCellClick(lastCell);
+                }
+            }
+        };
+        this.eventHandler = new TownEventHandler(eventConfig, this.containers.cellGrid);
+
         // Create basic cell texture
         this.createCellTexture();
 
         // Setup viewport event listeners
         this.cleanupViewport = this.viewportManager.setupEventListeners();
 
-        console.log('[TownGridManager] Initialized with viewport culling and layer management');
+        // Setup event handler listeners
+        this.cleanupEvents = this.setupEventListeners(containerNode);
+
+        console.log('[TownGridManager] Initialized with viewport culling, layer management, and event handling');
     }
 
     /**
@@ -110,6 +133,7 @@ export class TownGridManager {
      */
     updateTownData(townData: TownData): void {
         this.townData = townData;
+        this.eventHandler.updateTownData(townData);
         this.requestRender();
     }
 
@@ -153,126 +177,68 @@ export class TownGridManager {
     /**
      * Sets the current tool
      */
-    setTool(tool: 'select' | 'paint'): void {
-        this.currentTool = tool;
+    setTool(tool: TownToolMode): void {
+        this.eventHandler.updateState({ currentTool: tool });
     }
 
     /**
      * Sets the selected material for painting
      */
     setSelectedMaterial(material: TownMaterial | null): void {
-        this.selectedMaterial = material;
+        this.eventHandler.updateState({ selectedMaterial: material });
     }
 
     /**
-     * Starts a paint action
+     * Updates cell visuals immediately for paint batch
      */
-    startPaint(cellX: number, cellY: number): void {
-        if (!this.selectedMaterial || this.currentTool !== 'paint') return;
-
-        this.isPainting = true;
-        this.paintedCellsBatch.clear();
-        this.paintCellLocally(cellX, cellY);
-        this.lastPaintedCell = { x: cellX, y: cellY };
-    }
-
-    /**
-     * Continues a paint action (drag painting)
-     */
-    continuePaint(cellX: number, cellY: number): void {
-        if (!this.isPainting || !this.selectedMaterial) return;
-
-        if (this.lastPaintedCell) {
-            // Paint line between last and current cell
-            const points = this.getLine(this.lastPaintedCell.x, this.lastPaintedCell.y, cellX, cellY);
-            points.forEach(point => this.paintCellLocally(point.x, point.y));
-        } else {
-            this.paintCellLocally(cellX, cellY);
-        }
-        this.lastPaintedCell = { x: cellX, y: cellY };
-    }
-
-    /**
-     * Ends a paint action and calls the batch update callback
-     */
-    endPaint(): { x: number; y: number } | null {
-        if (!this.isPainting) return null;
-
-        this.isPainting = false;
-
-        if (this.paintedCellsBatch.size > 0 && this.config.onCellPaint) {
-            this.config.onCellPaint(Array.from(this.paintedCellsBatch.values()));
-        }
-
-        const lastCell = this.lastPaintedCell;
-        this.lastPaintedCell = null;
-        return lastCell;
-    }
-
-    /**
-     * Paints a single cell locally (visual update)
-     */
-    private paintCellLocally(cellX: number, cellY: number): void {
-        if (!this.selectedMaterial || !this.townData) return;
-
-        const cellKey = `${cellX},${cellY}`;
-
-        // Don't paint the same cell twice in one batch
-        if (this.paintedCellsBatch.has(cellKey)) return;
-
-        // Validate cell is within bounds
-        if (cellX < 0 || cellY < 0 ||
-            cellX >= this.townData.gridDimensions.width ||
-            cellY >= this.townData.gridDimensions.height) {
-            return;
-        }
-
-        // Find the cell sprite and update its color
+    private updateCellVisuals(batch: Array<{ x: number; y: number; material: string }>): void {
         const cellSprites = this.layerManager.getCellSprites();
-        const sprite = cellSprites?.get(cellKey);
-        if (sprite) {
-            sprite.tint = new PIXI.Color(this.selectedMaterial.color).toNumber();
-        }
+        if (!cellSprites) return;
 
-        // Add to batch for state update
-        this.paintedCellsBatch.set(cellKey, {
-            x: cellX,
-            y: cellY,
-            material: this.selectedMaterial.style
+        batch.forEach(({ x, y, material }) => {
+            const cellKey = `${x},${y}`;
+            const sprite = cellSprites.get(cellKey);
+            const materialData = this.materials.find(m => m.style === material);
+            
+            if (sprite && materialData) {
+                sprite.tint = new PIXI.Color(materialData.color).toNumber();
+            }
         });
     }
 
     /**
-     * Get line points between two cells (Bresenham's line algorithm)
+     * Sets up event listeners for pointer interactions
      */
-    private getLine(x0: number, y0: number, x1: number, y1: number): { x: number; y: number }[] {
-        const points: { x: number; y: number }[] = [];
-        const dx = Math.abs(x1 - x0);
-        const dy = Math.abs(y1 - y0);
-        const sx = x0 < x1 ? 1 : -1;
-        const sy = y0 < y1 ? 1 : -1;
-        let err = dx - dy;
-
-        let x = x0;
-        let y = y0;
-
-        while (true) {
-            points.push({ x, y });
-
-            if (x === x1 && y === y1) break;
-
-            const e2 = 2 * err;
-            if (e2 > -dy) {
-                err -= dy;
-                x += sx;
+    private setupEventListeners(containerNode: HTMLElement): () => void {
+        const onPointerDown = (e: PointerEvent) => {
+            if (this.app.canvas) {
+                this.eventHandler.handlePointerDown(e, this.app.canvas);
             }
-            if (e2 < dx) {
-                err += dx;
-                y += sy;
-            }
-        }
+        };
 
-        return points;
+        const onPointerMove = (e: PointerEvent) => {
+            if (this.app.canvas) {
+                this.eventHandler.handlePointerMove(e, this.app.canvas);
+            }
+        };
+
+        const onPointerUp = (e: PointerEvent) => {
+            if (this.app.canvas) {
+                this.eventHandler.handlePointerUp(e, this.app.canvas);
+            }
+        };
+
+        // Add event listeners
+        containerNode.addEventListener('pointerdown', onPointerDown);
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+
+        // Return cleanup function
+        return () => {
+            containerNode.removeEventListener('pointerdown', onPointerDown);
+            window.removeEventListener('pointermove', onPointerMove);
+            window.removeEventListener('pointerup', onPointerUp);
+        };
     }
 
     /**
@@ -286,7 +252,8 @@ export class TownGridManager {
      * Handles pan state changes
      */
     private handlePanStateChange(isPanning: boolean, didPan: boolean): void {
-        // Could be used for cursor changes or other UI feedback
+        // Update event handler with panning state
+        this.eventHandler.updatePanningState(isPanning, didPan);
         console.log('[TownGridManager] Pan state changed:', { isPanning, didPan });
     }
 
@@ -380,6 +347,12 @@ export class TownGridManager {
             this.cleanupViewport = null;
         }
 
+        if (this.cleanupEvents) {
+            this.cleanupEvents();
+            this.cleanupEvents = null;
+        }
+
+        this.eventHandler.destroy();
         this.viewportManager.destroy();
         this.layerManager.destroy();
 
