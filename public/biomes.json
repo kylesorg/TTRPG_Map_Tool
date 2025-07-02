@@ -1,0 +1,37 @@
+[
+    {
+        "name": "Desert",
+        "color": "rgba(194, 178, 128, 1.0)",
+        "description": "Dry, arid biome with minimal vegetation and high temperatures."
+    },
+    {
+        "name": "Forest",
+        "color": "rgba(34, 139, 34, 1.0)",
+        "description": "Dense area of trees and undergrowth, temperate or mixed woodland."
+    },
+    {
+        "name": "Grassland",
+        "color": "rgba(218, 165, 32, 1.0)",
+        "description": "Open plains with grasses and few trees; includes prairie and savanna."
+    },
+    {
+        "name": "Mountain",
+        "color": "rgba(139, 137, 137, 1.0)",
+        "description": "High elevation terrain with peaks, ridges, and steep slopes."
+    },
+    {
+        "name": "Ocean",
+        "color": "rgba(0, 0, 139, 1.0)",
+        "description": "Large saltwater body covering most of the world's surface."
+    },
+    {
+        "name": "Polar",
+        "color": "rgba(175, 238, 238, 1.0)",
+        "description": "Frozen, treeless biome with permafrost and low biodiversity."
+    },
+    {
+        "name": "Swamp",
+        "color": "rgba(138, 154, 91, 1.0)",
+        "description": "Waterlogged, muddy area with dense vegetation and slow-moving water."
+    }
+]

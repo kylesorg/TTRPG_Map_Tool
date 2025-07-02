@@ -1,0 +1,741 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  /* Ensure #root is also a flex container if App is its only child */
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  /* Full viewport height */
+  width: 100vw;
+  /* Full viewport width */
+  overflow: hidden;
+  position: relative;
+  background-color: #242424;
+  /* Match body background if needed */
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* Remove fixed map-area and tools-panel styling if react-mosaic handles it */
+/* .map-area {
+  flex-grow: 1;
+  background-color: #333;
+  overflow: hidden; 
+  position: relative; 
+}
+
+.tools-panel {
+  width: 300px;
+  padding: 10px;
+  background-color: #2a2a2a;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+} */
+
+.mosaic-blueprint-theme .mosaic-root {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* Ensure this is present */
+}
+
+/* Style for the panel content if needed */
+.panel-content {
+  padding: 10px;
+  background-color: rgba(40, 40, 40, 0.9);
+  /* Made less transparent */
+  height: 100%;
+  /* Ensure content fills the panel */
+  overflow-y: auto;
+  /* Add scroll for content longer than panel */
+  color: #f0f0f0;
+  /* Ensuring a light text color */
+  border-radius: 4px;
+  /* Optional: slightly rounded corners for panels */
+}
+
+.panel-content h2,
+.panel-content h4 {
+  margin-top: 0;
+}
+
+/* Ensure SVG in HexGrid takes full space of its mosaic tile */
+.hex-grid-container,
+.hex-grid-container svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* Remove extra space below SVG if it's inline */
+}
+
+/* Specific styling for floating panels */
+/* This requires that the 'tools' and 'details' MosaicWindow instances */
+/* are NOT direct children of the main Mosaic root if we want them to truly float */
+/* above the 'map' view. If they are part of the same tiling structure, */
+/* they will always take up dedicated space. */
+
+/* For a true overlay, you would typically position these elements absolutely */
+/* relative to a common parent that contains the map. */
+/* Let's try to make them appear more like overlays within the mosaic structure first. */
+
+/* Assuming 'tools' and 'details' are the keys for your MosaicWindows */
+/* You might need to target them more specifically if App.tsx changes */
+
+.mosaic-window[title="Tools & Biomes"],
+.mosaic-window[title="Hex Details"] {
+  /* This will NOT make them float over other mosaic tiles. */
+  /* It will style them within their allocated tile space. */
+  /* To make them float, they need to be outside the normal mosaic flow. */
+  /* Consider this a styling for how they look in their tiled position. */
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+  border: 1px solid #555;
+}
+
+/* If you want to attempt an overlay for tools/details *without* removing them from mosaic: */
+/* This is experimental and might have unintended side effects with mosaic's resizing logic. */
+/*
+.mosaic-window[title="Tools & Biomes"] {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 250px; 
+  height: auto; 
+  max-height: 80%;
+  z-index: 10;
+  background-color: rgba(30,30,30,0.9);
+}
+
+.mosaic-window[title="Hex Details"] {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 300px;
+  height: auto;
+  max-height: 50%;
+  z-index: 10;
+  background-color: rgba(30,30,30,0.9);
+}
+*/
+
+/* Ensure the map container takes up all available space if it's the 'background' */
+.mosaic-window[title="World Map"] .mosaic-window-content {
+  /* The HexGrid component itself should handle its SVG sizing to fill this */
+  overflow: hidden;
+  /* Important for the SVG viewport behavior */
+}
+
+/* Ensure SVG in HexGrid fills its container */
+.hex-grid-container svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Basic styles for floating panels */
+.floating-panel {
+  position: absolute;
+  z-index: 10;
+  background-color: rgba(40, 40, 40, 0.95);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 15px;
+  overflow-y: auto;
+  color: #f0f0f0;
+  transition: transform 0.3s ease-in-out, opacity 0.3s ease-in-out;
+}
+
+.tools-panel {
+  top: 20px;
+  left: 20px;
+  width: 280px;
+  max-height: calc(100vh - 40px);
+}
+
+.details-panel {
+  top: 20px;
+  right: 20px;
+  width: 320px;
+  max-height: calc(100vh - 40px);
+}
+
+/* Styles for panel toggle buttons */
+.panel-toggle-button {
+  position: absolute;
+  z-index: 11;
+  background-color: #3a3a3a;
+  color: #f0f0f0;
+  border: 1px solid #333;
+  cursor: pointer;
+  font-size: 16px;
+  width: 30px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.panel-toggle-button:hover {
+  background-color: #4a4a4a;
+}
+
+.tools-toggle-button {
+  top: 20px;
+  left: 20px;
+  /* Positioned with the panel if open, or at edge if closed */
+  border-radius: 0 5px 5px 0;
+}
+
+/* .tools-toggle-button.open {
+  Adjust if needed when panel is open, e.g., move with panel edge
+  left: calc(20px + 280px + 10px);  Example: panel left + panel width + gap 
+} */
+
+.details-toggle-button {
+  top: 20px;
+  right: 20px;
+  /* Positioned with the panel if open, or at edge if closed */
+  border-radius: 5px 0 0 5px;
+}
+
+/* .details-toggle-button.open {
+  Adjust if needed when panel is open
+  right: calc(20px + 320px + 10px); 
+} */
+
+/* Close button inside panels (e.g., for details panel) */
+.panel-close-button {
+  background-color: #555;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  float: right;
+  /* Or use flexbox for positioning */
+  margin-bottom: 10px;
+}
+
+.panel-close-button:hover {
+  background-color: #777;
+}
+
+/* Tab styling (remains largely the same) */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #555;
+  margin-bottom: 10px;
+}
+
+.tabs button {
+  background-color: transparent;
+  border: none;
+  color: #ccc;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs button:hover {
+  color: #fff;
+}
+
+.tabs button.active {
+  color: #fff;
+  border-bottom: 2px solid #61dafbaa;
+  font-weight: bold;
+}
+
+.tab-content h4 {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.tool-section {
+  margin-bottom: 15px;
+}
+
+/* Adjusted styles for tool sections and buttons for consistency */
+
+.tool-section:last-child {
+  border-bottom: none;
+}
+
+.tool-section h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #fff;
+  /* Ensure heading is visible */
+  border-bottom: 1px solid #555;
+  padding-bottom: 5px;
+}
+
+.tool-section button,
+.tool-section .goto-coords button,
+.panel-button
+
+/* Added generic panel button class */
+  {
+  background-color: #4f4f4f;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-top: 5px;
+  text-align: center;
+  display: block;
+  /* Make buttons full width of panel section */
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  /* Space between buttons */
+}
+
+.tool-section button:hover,
+.tool-section .goto-coords button:hover,
+.panel-button:hover
+
+/* Added hover for generic panel button */
+  {
+  background-color: #6a6a6a;
+}
+
+.tool-section button.active,
+.panel-button.active
+
+/* Added active for generic panel button */
+  {
+  background-color: #61dafbaa;
+  /* Highlight active tool button */
+  color: black;
+}
+
+.panel-button.button-danger {
+  background-color: #f44336;
+}
+
+.panel-button.button-danger:hover {
+  background-color: #d32f2f;
+}
+
+
+.goto-coords {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.goto-coords input[type="number"] {
+  width: 60px;
+  padding: 5px;
+  background-color: #333;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 3px;
+}
+
+.goto-coords button {
+  padding: 5px 10px;
+  background-color: #555;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.goto-coords button:hover {
+  background-color: #666;
+}
+
+/* Ensure the map container takes up all available space */
+.map-view-container {
+  flex-grow: 1;
+  position: relative;
+  /* For potential absolute positioning of children if needed */
+  overflow: hidden;
+  /* Crucial for SVG viewport behavior */
+}
+
+/* Main layout for horizontal arrangement */
+.main-layout-horizontal {
+  display: flex;
+  flex-direction: row;
+  flex-grow: 1;
+  /* Takes up available vertical space in app-container */
+  overflow: hidden;
+  /* height: 100%; /* This can be tricky; flex-grow is often better */
+}
+
+/* Refinements for floating panels in the new layout */
+.floating-panel {
+  background-color: #2a2a2a;
+  color: #f0f0f0;
+  padding: 15px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  /* Consistent gap for sections within panels */
+}
+
+.floating-panel.tools-panel.left-panel {
+  width: 280px;
+  /* Slightly adjusted width */
+  height: 100%;
+  /* Full height of the main-layout-horizontal row */
+  border-right: 1px solid #444;
+  /* Separator */
+  box-sizing: border-box;
+  /* Ensure padding is included in width/height */
+}
+
+/* NEW: Styles for the Town View Left Tools Panel */
+.floating-panel.town-tools-left-panel {
+  width: 280px;
+  height: 100%;
+  border-right: 1px solid #444;
+  box-sizing: border-box;
+  /* Inherits .floating-panel styles for background, color, padding, overflow, flex-direction, gap */
+  /* Specifically for town tools, ensure it's positioned correctly if app-container is its direct parent */
+  position: relative;
+  /* Or static if it's part of the flex flow of town-view-active */
+  flex-shrink: 0;
+  /* Prevent shrinking */
+}
+
+.floating-panel.details-panel.right-panel {
+  width: 320px;
+  /* Adjusted width to match HexDetailPanel */
+  height: 100%;
+  /* Full height of the main-layout-horizontal row */
+  border-left: 1px solid #444;
+  /* Separator */
+  box-sizing: border-box;
+  /* Ensure padding is included in width/height */
+}
+
+/* Styles for panel toggle buttons */
+.panel-toggle-button {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: #333;
+  color: white;
+  border: 1px solid #555;
+  border-radius: 0 4px 4px 0;
+  /* Rounded on one side */
+  padding: 10px 5px;
+  cursor: pointer;
+  z-index: 100;
+  /* Ensure it\'s above other content */
+  font-size: 16px;
+  line-height: 1;
+}
+
+.panel-toggle-button.left-toggle {
+  left: 0;
+  /* Default for when panel is closed */
+  /* border-radius: 0 4px 4px 0; */
+  /* This is for when it\'s on the left edge of screen */
+}
+
+.panel-toggle-button.left-toggle.open {
+  left: 280px;
+  /* Width of the open left panel */
+}
+
+
+/* NEW: Styles for the Town Tools Panel Toggle Button */
+.panel-toggle-button.town-tools-toggle-button.left-toggle {
+  left: 0;
+  /* Default for when panel is closed */
+  /* Uses .panel-toggle-button base styles */
+}
+
+.panel-toggle-button.town-tools-toggle-button.left-toggle.open {
+  left: 280px;
+  /* Width of the open town tools left panel */
+}
+
+
+/* Town View Specific Styles */
+.town-view-active {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 100%;
+}
+
+.town-tools-left-panel {
+  width: 280px;
+  height: 100%;
+  border-right: 1px solid #444;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  position: relative;
+}
+
+#town-grid-container,
+.town-grid-container {
+  flex-grow: 1;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: #1a1a1a;
+}
+
+.town-details-right-panel {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 340px;
+  max-height: calc(100vh - 40px);
+  height: auto;
+  border-left: 1px solid #444;
+  box-sizing: border-box;
+  background: #232323;
+  color: #eee;
+  overflow-y: auto;
+  z-index: 20;
+  border-radius: 8px 0 0 8px;
+  box-shadow: -2px 0 12px rgba(0, 0, 0, 0.25);
+  transition: transform 0.3s cubic-bezier(.4, 0, .2, 1), opacity 0.3s cubic-bezier(.4, 0, .2, 1);
+  /* Slide in from right */
+  transform: translateX(0);
+}
+
+.town-details-right-panel.hide {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(100%);
+}
+
+@media (max-width: 900px) {
+  .town-details-right-panel {
+    width: 95vw;
+    right: 0;
+    top: 0;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+}
+
+/* Styles for content within the new town-tools-left-panel */
+.town-tools-left-panel .tool-section {
+  margin-bottom: 15px;
+}
+
+.town-tools-left-panel .tool-section h4 {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #fff;
+  border-bottom: 1px solid #555;
+  padding-bottom: 5px;
+}
+
+.town-tools-left-panel .tool-section button,
+.town-tools-left-panel .panel-button {
+  /* Use existing .panel-button styles, ensure they apply or replicate here */
+  /* These are from .tool-section button, .panel-button */
+  background-color: #4f4f4f;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  /* Standard panel button padding */
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-top: 5px;
+  text-align: center;
+  display: block;
+  /* Make buttons full width of panel section */
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+  /* Space between buttons */
+}
+
+.town-tools-left-panel .tool-section button:hover,
+.town-tools-left-panel .panel-button:hover {
+  background-color: #6a6a6a;
+}
+
+.town-tools-left-panel .tool-section button.active,
+.town-tools-left-panel .panel-button.active {
+  background-color: #61dafbaa;
+  color: black;
+}
+
+/* Styling for material selector buttons in town tools panel */
+.town-tools-left-panel .material-selector-container {
+  display: flex;
+  flex-wrap: wrap;
+  /* Allow buttons to wrap */
+  gap: 5px;
+  /* Spacing between material buttons */
+}
+
+.town-tools-left-panel .material-selector-container button {
+  /* Override block display from general button style in this panel */
+  display: inline-block;
+  width: auto;
+  /* Fit content */
+  min-width: 80px;
+  /* Ensure a decent tap target */
+  padding: 6px 10px;
+  /* Slightly smaller padding */
+  /* Other styles like background, color, border will be set inline or by specific material */
+}
+
+
+/* Ensure HexDetailPanel specific styles are consistent */
+.details-panel .tool-section h4,
+/* Target h4 within .tool-section if that's the structure */
+.details-panel h3,
+/* General h3 in details panel */
+.details-panel h4
+
+/* General h4 in details panel */
+  {
+  margin-top: 0;
+  margin-bottom: 10px;
+  color: #fff;
+  border-bottom: 1px solid #555;
+  padding-bottom: 5px;
+}
+
+.details-panel p {
+  margin-bottom: 8px;
+}
+
+.details-panel input[type="text"],
+.details-panel select,
+.details-panel textarea {
+  background-color: #333;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 3px;
+  padding: 6px 10px;
+  width: calc(100% - 22px);
+  /* Account for padding and border */
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+
+.details-panel textarea {
+  min-height: 60px;
+}
+
+/* Explicitly style buttons within details panel if they don't pick up .panel-button */
+.details-panel button {
+  /* This will be overridden by .panel-button if applied, which is good */
+  /* If not, this provides a fallback */
+  background-color: #4f4f4f;
+  color: white;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-top: 5px;
+  margin-right: 5px;
+  /* Spacing for multiple buttons on a line */
+}
+
+.details-panel button:hover {
+  background-color: #6a6a6a;
+}
+
+.details-panel button.button-danger {
+  background-color: #f44336;
+}
+
+.details-panel button.button-danger:hover {
+  background-color: #d32f2f;
+}
+
+/* Geography Tool Cursors */
+.geography-tool-cursor {
+  cursor: crosshair;
+}
+
+.geography-tool-draw-cursor {
+  cursor: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSI2IiB5PSI2IiB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMDAwIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMSIvPgo8L3N2Zz4=') 8 8, crosshair;
+}
+
+.geography-tool-erase-cursor {
+  cursor: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iOCIgaGVpZ2h0PSI4IiBmaWxsPSIjZmY2NjY2IiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMSIvPgo8L3N2Zz4=') 8 8, crosshair;
+}

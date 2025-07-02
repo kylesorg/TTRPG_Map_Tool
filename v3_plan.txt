@@ -1,0 +1,131 @@
+# V3 Plan: World Map Tool - Towns, Persistence, and Enhancements
+
+## 1. Overall Goals for V3
+
+*   Implement a comprehensive Town system, allowing users to designate hexes as towns and design their interiors using variable grid sizes.
+*   Introduce robust data persistence (local JSON save/load), enabling users to save, load, import, and export their world data, including dynamic biome/tool configurations.
+*   Add free-hand drawing capabilities for roads, rivers, and other map features.
+*   Enhance the tool's extensibility for future features, particularly dynamic configuration of biomes and tools loaded from saved files.
+*   Refactor and improve code maintainability, ensuring no regressions in existing V2 functionality (select, paint, drag-paint, go-to, pan, zoom).
+
+## 2. Core V3 Features
+
+### 2.1. Town System
+    *   **Town Designation & Sizing:**
+        *   Allow users to mark a hex as a "Town" via a flag/checkbox in Hex Details.
+        *   When a hex is designated as a town:
+            *   Its biome is set to "Town" (a non-paintable biome type) and locked. The "Town" biome should not appear in the biome painting palette.
+            *   User selects a town size:
+                *   Small: 220 cells wide x 124 cells high
+                *   Medium: 330 cells wide x 186 cells high
+                *   Large: 440 cells wide x 248 cells high
+                (Each cell is an abstract square, representing a 5x5ft area for user reference, not for engine scaling).
+        *   Store town-specific properties: `id` (e.g., `town_q_r_s`), `name`, `sizeCategory` (Small, Medium, Large), `gridDimensions` (width, height in cells), `icon/art`, `notes`, `population`, `races`, etc.
+    *   **Town View/Interior:**
+        *   "Enter Town" button on a town hex in `HexDetailPanel`.
+        *   Loads a separate canvas-based view (`TownGridWebGL.tsx`) displaying the town's grid of square cells according to its defined dimensions.
+        *   Initial town grid cells are generated based on the parent hex's original biome (or a town-specific default like "Plains").
+        *   **Town-Specific Tools:**
+            *   Similar to world map: Go To, Select.
+            *   "Paint Town Cell" tool (analogous to "Paint Biome") using town-specific "biomes" or cell types (e.g., Gravel Road, Dirt Road, Wood Building, Stone Building, Grass, Water). These types should have configurable colors/textures.
+    *   **Building Management:**
+        *   "Group" tool to select multiple cells and designate them as a single building (e.g., "Tavern," "Shop").
+        *   Store building-specific details: name, notes, function, occupied cells, etc.
+
+### 2.2. Data Persistence & Dynamic Configuration
+    *   **Save/Load World (Local JSON):**
+        *   Implement functionality to save the entire world state to a local JSON file. This includes:
+            *   All `HexTile` data.
+            *   All `TownData` (including their grids, cell states, and building data).
+            *   Free-hand `DrawingPath` data.
+            *   Metadata: List of all available `Biome` definitions (name, color, description), including any custom ones. List of town cell material definitions.
+        *   Implement functionality to load a world state from a user-selected JSON file.
+            *   On load, the application should dynamically update its available biomes, town cell materials, and their respective painting tools based on the data in the JSON file.
+    *   **Import/Export Buttons:** Dedicated UI buttons for these actions. Export compiles current state to JSON and prompts download. Import uses a file picker.
+    *   **State Retention:** Ensure world map and town map states are retained in memory when switching views (e.g., entering/exiting a town) to prevent data loss before a save.
+
+### 2.3. Free-Hand Drawing Tool
+    *   Develop tools for drawing roads, rivers, and other custom landmarks directly onto the world map (over the hex grid).
+    *   Ensure drawings are saved and loaded with the world data via JSON.
+    *   Consider performance implications for large numbers of drawn elements.
+
+### 2.4. Extensibility
+    *   Design data structures (e.g., for Biomes, Town Cell types) and systems to be easily extendable and configurable through the save/load mechanism.
+    *   Modularize components for better separation of concerns.
+
+## 3. Architectural Goals & Refactoring (Pre-V3 Implementation / Ongoing)
+
+*   **Code Review:** Thoroughly review existing `App.tsx`, `HexGridWebGL.tsx`, and related utility files.
+*   **Refactoring for Maintainability:**
+    *   Identify and refactor complex or coupled sections of code. Prioritize creating shared functions for logic used in multiple places to adhere to DRY.
+    *   Improve clarity, reduce redundancy.
+    *   Ensure consistent coding style and add documentation where needed.
+*   **State Management:** Evaluate current state management in `App.tsx`. For V3 complexity (multiple views, large datasets, dynamic configurations), consider if a more robust solution (e.g., Zustand, Redux Toolkit) is needed. For now, continue with prop drilling and callbacks, but be mindful of complexity.
+*   **Component Structure:** Break down large components into smaller, more manageable ones.
+*   **No Regressions:** Ensure all V2 features (select, paint, drag-paint, go-to, pan, zoom) remain fully functional after refactoring and new feature additions.
+
+## 4. Key Files & Modules (Focus for V3)
+
+*   **Core Logic & State:**
+    *   `src/App.tsx` (handles view switching, overall state)
+    *   `src/components/WorldMap/HexGridWebGL.tsx`
+    *   `src/components/WorldMap/HexDetailPanel.tsx` (for town designation & size selection)
+*   **Types:**
+    *   `src/types/mapTypes.ts` (updates for `HexTile` regarding towns)
+    *   `src/types/townTypes.ts` (expanded for `TownData` with size, `TownCell` types, `Building` types)
+    *   `src/types/sharedTypes.ts` (potentially for shared UI elements or tool configurations)
+*   **Utilities:**
+    *   `src/utils/constants.ts` (for town grid dimensions, town cell types)
+    *   `src/utils/gridHelpers.ts` (for world grid)
+    *   `src/utils/townGridHelpers.ts` (NEW: for town grid generation)
+*   **New Components (to be created for V3):**
+    *   `src/components/TownView/TownGridWebGL.tsx` (replaces `TownGrid.tsx`)
+    *   `src/components/TownView/TownCellComponent.tsx` (if needed for complex cell rendering within canvas, or for UI elements)
+    *   `src/components/TownView/BuildingEditor.tsx`
+    *   `src/components/Tools/DrawingToolsPanel.tsx`
+    *   `src/components/Tools/TownToolsPanel.tsx`
+    *   `src/components/System/SaveLoadManager.tsx` (or integrate into `App.tsx` / tools panel)
+
+## 5. Development Workflow for V3 (Phased Approach - Revised)
+
+1.  **Phase 3.0: Refactoring & Prep (Ongoing)**
+    *   Review and refactor V2 codebase as needed, focusing on DRY principles.
+    *   Finalize detailed data structures for towns (with variable sizes), buildings, town cells, and drawn elements in `*.ts` type files.
+    *   Update `src/utils/constants.ts` with town grid dimensions and initial town cell material definitions.
+2.  **Phase 3.1: Enhanced Town Designation & Basic Town Data**
+    *   Modify `HexDetailPanel.tsx` to include UI for selecting town size (Small, Medium, Large).
+    *   Update `App.tsx` `handleHexClick` (or a new `handleDesignateTown` function):
+        *   When designating a town, prompt for name and selected size.
+        *   Store `townName`, `sizeCategory`, and calculated `gridDimensions` in `TownData`.
+        *   Set hex biome to "Town" and lock it.
+        *   Ensure "Town" biome is not in the paintable list for the world map.
+3.  **Phase 3.2: Canvas-Based Town Interior Grid (Variable Sizes)**
+    *   Create `src/utils/townGridHelpers.ts` with `generateInitialTownGrid(townData: TownData): Record<string, TownCell>` that creates cells based on `townData.gridDimensions` and parent hex biome.
+    *   Implement `src/components/TownView/TownGridWebGL.tsx`:
+        *   Takes `townData` as prop.
+        *   Initializes PIXI.js to render the square grid based on `townData.gridDimensions`.
+        *   Renders basic cells colored by their `baseBiome` (or initial material).
+        *   Implements basic pan and zoom for the town grid.
+    *   Update `App.tsx` to use `TownGridWebGL.tsx` for the town view and pass the correct `TownData`.
+4.  **Phase 3.3: Town Cell Painting & Tools**
+    *   Define initial town cell "materials" (e.g., Gravel, Dirt, Wood Wall, Stone Wall) with names and colors in `constants.ts` and `townTypes.ts`.
+    *   Create `TownToolsPanel.tsx` with a "Paint Town Cell" tool and a material selector.
+    *   Implement logic in `TownGridWebGL.tsx` and `App.tsx` to handle painting selected town cells with the chosen material, updating the `TownCell` data.
+5.  **Phase 3.4: Building Management (Basic)**
+    *   Implement a "Group" tool in `TownToolsPanel.tsx`.
+    *   Allow selection of multiple cells in `TownGridWebGL.tsx`.
+    *   Store grouped cells as a `Building` in `TownData` with a name and notes.
+    *   Visually differentiate or overlay building areas on the town grid.
+6.  **Phase 3.5: Data Persistence (Save/Load World & Towns)**
+    *   Implement `SaveLoadManager` functionality:
+        *   `handleSaveWorld`: Collects all world hexes, all town data (including their grids and buildings), drawing paths, and biome/material definitions. Serializes to JSON and triggers download.
+        *   `handleLoadWorld`: Parses uploaded JSON. Populates `hexGrid`, `towns`, `drawingPaths`. Dynamically updates `ALL_BIOMES_ARRAY` and town material definitions. Refreshes UI.
+7.  **Phase 3.6: Free-Hand Drawing Tool (World Map)**
+    *   Develop `DrawingToolsPanel.tsx`.
+    *   Implement drawing functionality on `HexGridWebGL.tsx` (lines for roads/rivers).
+    *   Integrate `DrawingPath` data with save/load.
+8.  **Phase 3.7: UI/UX Refinement & Testing**
+    *   Refine user interface for all new features.
+    *   Conduct thorough testing of all V2 and V3 features, focusing on data integrity during view switches and save/load operations.
+
+This plan will be updated as development progresses.

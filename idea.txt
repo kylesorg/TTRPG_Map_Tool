@@ -1,0 +1,178 @@
+Project: Tabletop RPG World Making Tool
+
+Features:
+
+1.  Hexagonal World Map:
+    *   Grid of hexagonal tiles (12 miles each).
+    *   Hex Details (on selection):
+        *   Biome (28 types, affects display).
+        *   Encounters (custom properties).
+        *   Notes.
+        *   Other info.
+
+2.  Free-Hand Drawing Tool:
+    *   Draw roads, rivers, landmarks over hexes.
+
+3.  Towns:
+    *   Town hexes with icon/art, notes, population, races, etc.
+    *   "Enter Town" button.
+    *   Town View: 5x5 grid (500x500, 5-foot squares).
+        *   Default cell color by biome.
+        *   Cells can be changed to represent buildings (placeholders for art).
+        *   Group multiple cells into one building (e.g., "Tavern").
+        *   Edit building notes.
+
+4.  Tools & Modes:
+    *   Select Tool.
+    *   Group Tool (for buildings).
+    *   Create Mode.
+    *   View Mode.
+
+Data Structures (Initial Thoughts):
+
+*   WorldMap:
+    *   hexes: Array<HexTile>
+*   HexTile:
+    *   id: string
+    *   coordinates: {q: number, r: number, s: number} // or x, y
+    *   biome: string (enum or type)
+    *   encounters: Array<Encounter>
+    *   notes: string
+    *   isTown: boolean
+    *   townId?: string
+*   Encounter:
+    *   name: string
+    *   description: string
+    *   // other properties
+*   DrawingLayer:
+    *   paths: Array<PathObject> // PathObject could define points, color, thickness
+*   Town:
+    *   id: string
+    *   name: string
+    *   icon?: string
+    *   notes: string
+    *   population: number
+    *   races: Array<string>
+    *   grid: Array<Array<TownCell>> // 5x5 grid
+*   TownCell:
+    *   id: string
+    *   coordinates: {x: number, y: number}
+    *   baseColor: string // from biome
+    *   buildingId?: string
+*   Building:
+    *   id: string
+    *   name: string
+    *   cells: Array<{x: number, y: number}> // coordinates of cells it occupies
+    *   notes: string
+    *   // art placeholder
+
+File Structure Ideas (within src):
+
+*   components/
+    *   WorldMap/
+        *   HexGrid.tsx
+        *   HexTile.tsx
+        *   HexDetailPanel.tsx
+    *   TownView/
+        *   TownGrid.tsx
+        *   TownCell.tsx
+        *   BuildingForm.tsx
+    *   Common/
+        *   Toolbar.tsx
+        *   DrawingCanvas.tsx
+*   contexts/ or store/ (for state management - e.g., Zustand, Redux, or React Context)
+    *   WorldMapContext.ts
+    *   TownContext.ts
+*   types/
+    *   mapTypes.ts
+    *   townTypes.ts
+    *   sharedTypes.ts
+*   utils/
+    *   gridHelpers.ts (for hex and square grid logic)
+*   assets/
+    *   icons/
+    *   images/
+*   App.tsx
+*   main.tsx
+
+Next Steps:
+
+*   Initialize Git repository.
+*   Install necessary libraries (e.g., for hexagonal grid rendering, state management).
+*   Start building the core HexGrid component.
+
+## Progress & Next Steps (As of June 8, 2025)
+
+**COMPLETED:**
+*   Project Setup: Initialized Node.js project `world-map` with Vite/React/TS in `c:\Users\kyles\OneDrive\programming\World Map`.
+*   Documentation & Planning: Created `idea.txt` and `.github\copilot-instructions.md`.
+*   Core Structure & Types: Established directory structure. Defined initial TypeScript interfaces in `src/types/` (`mapTypes.ts`, `townTypes.ts`, `sharedTypes.ts`), including `HexTile` with `coordinates` (axial q,r,s) and user-facing `labelX`, `labelY`.
+*   VS Code Task: Created `tasks.json` entry for `npm run dev`.
+*   Hexagonal Grid Implementation:
+    *   Successfully rendered a perfectly meshed (no gaps) grid of **pointy-topped** hexagons.
+    *   Implemented an **"odd-r" layout** (odd axial rows are shifted horizontally).
+    *   User-facing coordinates (`labelX`, `labelY`) are displayed on hexes and correctly mapped to underlying axial coordinates (`q`, `r`).
+    *   Implemented click-drag panning and mouse-wheel zooming for the SVG grid.
+    *   Hexes default to white.
+    *   `HexDetailPanel` shows basic info for the selected hex.
+
+**CURRENT FOCUS / IMMEDIATE NEXT STEPS:**
+
+1.  **Scale Grid & Performance:**
+    *   Increase grid size (e.g., to 50x50 for initial testing, then make it user-configurable, aiming for 500x500 capability).
+    *   **Implement Virtualization/Windowing:** This is crucial. Only render hexes that are currently visible within the viewport (plus a small buffer).
+        *   Research and decide on a method: custom logic based on `viewBox` or a library like `react-virtualized` / `react-window` if adaptable for SVG.
+        *   Calculate the range of visible hexes based on the current `viewBox` (pan/zoom state) and hex dimensions.
+        *   Update `HexGrid.tsx` to dynamically render only the `HexTile` components within this visible range.
+2.  **Biome System & Painting Tool (Phase 1):**
+    *   **Refine Biome Type:** In `src/types/mapTypes.ts`, change the `Biome` type from a simple string to an object: `export type Biome = { name: string; color: string; image?: string; };`
+    *   **Biome Constants:** In `src/utils/constants.ts`, define an array or object for `INITIAL_BIOMES`. Include:
+        *   Unassigned: `{ name: "Unassigned", color: "#CCCCCC" }` (or a light grey)
+        *   Forest: `{ name: "Forest", color: "#228B22" }` (Forest Green)
+        *   Grassland: `{ name: "Grassland", color: "#90EE90" }` (Light Green)
+        *   Desert: `{ name: "Desert", color: "#F4A460" }` (Sandy Brown)
+        *   Tundra: `{ name: "Tundra", color: "#ADD8E6" }` (Light Blue)
+        *   Mountain: `{ name: "Mountain", color: "#808080" }` (Grey)
+        *   Swamp: `{ name: "Swamp", color: "#556B2F" }` (Dark Olive Green)
+        *   Aquatic: `{ name: "Aquatic", color: "#00FFFF" }` (Cyan/Aqua)
+        *   (Assign the `UNASSIGNED_BIOME` constant to the "Unassigned" biome object).
+    *   **Biome Painter Tool (UI):**
+        *   Create a new component, e.g., `BiomeSelector.tsx` in `src/components/Tools/`.
+        *   This component will display buttons or a dropdown for each biome in `INITIAL_BIOMES`.
+        *   Manage the `currentSelectedBiome` state in `App.tsx` or a context, and pass it down/allow `BiomeSelector` to update it.
+    *   **Painting Logic:**
+        *   In `HexGrid.tsx` (or `App.tsx`), add a state for the current tool, e.g., `currentTool: 'select' | 'paintBiome'`.
+        *   When `currentTool` is `'paintBiome'`, clicking a `HexTile` should:
+            *   Update the `hexTiles` state: find the clicked hex and change its `biome` property to the `currentSelectedBiome`.
+    *   **HexTile Color Update:**
+        *   Modify `HexTile.tsx` to use `tile.biome.color` for its fill. If `tile.biome` is undefined or a string (old format), default to a standard color (e.g., white or the unassigned biome color).
+3.  **Hex Detail Panel Enhancements (Phase 1):**
+    *   In `HexDetailPanel.tsx`:
+        *   Display user-facing coordinates: `Selected Hex: X: {selectedHex.labelX}, Y: {selectedHex.labelY}`.
+        *   Display the selected hex's biome name: `Biome: {selectedHex.biome.name}` (ensure `selectedHex.biome` is an object).
+
+**PENDING / FUTURE WORK (Post-Immediate Next Steps):**
+
+*   **Update `idea.txt`:** Regularly update this file with completed tasks and refined next steps. (Meta-task)
+*   **Biome System (Phase 2 - Images & Customization):**
+    *   If `biome.image` is present and the asset exists (e.g., `public/assets/biomes/{biome.name.toLowerCase()}.png`), render it as an SVG pattern fill or `<image>` tag within the hex in `HexTile.tsx`.
+    *   (Future) Allow users to define new biomes (name, color picker, optional image URL), saved in map JSON.
+*   **Hex Detail Panel Enhancements (Phase 2 - Towns):**
+    *   If `selectedHex.isTown` is true, display `Town: {selectedHex.townName}`.
+    *   Implement the "Enter Town" button functionality (this will involve state changes to switch views, to be detailed later).
+*   **Town System Implementation:**
+    *   Design and implement the 5x5 town grid view.
+    *   Functionality to change town cell appearance (e.g., to represent buildings).
+    *   Tool for grouping multiple cells into a single building entity.
+*   **Free-Hand Drawing Tool:** For roads, rivers, etc., over the hex grid.
+*   **UI/UX Refinements:**
+    *   Develop a main toolbar for selecting tools (Select, Biome Painter, Draw, Group Buildings).
+    *   Implement mode switching (e.g., Create Mode, View Mode).
+*   **Data Persistence:**
+    *   Implement map export to JSON.
+    *   Implement map import from JSON.
+*   **Advanced Features (Long-term):**
+    *   Memory usage indicator.
+    *   Advanced debugging aids.
+    *   Pathfinding.
+    *   Multi-level maps.
