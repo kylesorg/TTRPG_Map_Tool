@@ -131,8 +131,12 @@ export class HexRenderer {
         fillSprite.visible = true;
         // Alpha will be set below based on biome assignment
 
-        // Update fill color and transparency based on biome
-        if (hex.biome && hex.biome.color && hex.biome.name !== 'Unassigned' && hex.biome.color !== 'transparent') {
+        // Update fill color and transparency based on biome or town status
+        if (hex.isTown) {
+            // Towns get a special black semi-transparent overlay
+            fillSprite.tint = 0x000000; // Black
+            fillSprite.alpha = 0.8; // 80% opacity
+        } else if (hex.biome && hex.biome.color && hex.biome.name !== 'Unassigned' && hex.biome.color !== 'transparent') {
             const colorData = this.parseColor(hex.biome.color);
             fillSprite.tint = colorData.color;
             fillSprite.alpha = colorData.alpha;            // Test alpha behavior for debugging

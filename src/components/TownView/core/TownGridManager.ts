@@ -11,13 +11,15 @@ export interface TownGridManagerConfig {
     layers: TownLayerManagerConfig;
     onCellClick?: (cell: { x: number; y: number }) => void;
     onCellPaint?: (batch: { x: number; y: number; material: string }[]) => void;
-    onStickerPlace?: (sticker: TownSticker) => void;
+    onPaintComplete?: (cell: { x: number; y: number }) => void;
+    onStickerPlace?: (position: { x: number; y: number }) => void;
 }
 
 export class TownGridManager {
     private config: TownGridManagerConfig;
     private app: PIXI.Application;
     private containers: TownLayerContainers;
+    private containerNode: HTMLElement;
 
     // Managers
     private viewportManager: TownViewportManager;
@@ -31,14 +33,20 @@ export class TownGridManager {
     private materials: TownMaterial[] = [];
     private stickers: TownSticker[] = [];
     private cellTexture: PIXI.Texture | null = null;
+    private selectedCell: { x: number; y: number } | null = null;
+    private livePaintOverlay: Map<string, { x: number; y: number; material: string }> = new Map();
 
     // Performance tracking
     private lastRenderTime = 0;
     private renderRequested = false;
+    private lastViewportChangeTime = 0;
+    private viewportChangeThrottleMs = 16; // ~60fps
+    private lastRenderedBounds: any = null;
 
     constructor(config: TownGridManagerConfig, app: PIXI.Application, containerNode: HTMLElement) {
         this.config = config;
         this.app = app;
+        this.containerNode = containerNode;
 
         // Create layer containers
         this.containers = this.createLayerContainers();
@@ -60,24 +68,33 @@ export class TownGridManager {
         // Initialize event handler
         const eventConfig: TownEventHandlerConfig = {
             cellSize: config.cellSize,
-            onCellClick: (cell) => {
-                if (config.onCellClick) {
-                    config.onCellClick(cell);
-                }
-            },
+            onCellClick: (cell) => config.onCellClick?.(cell),
             onPaintCellBatch: (batch) => {
-                if (config.onCellPaint) {
-                    config.onCellPaint(batch);
-                }
-                // Update cell visuals immediately
-                this.updateCellVisuals(batch);
+                // Clear live paint overlay when batch is finalized
+                this.livePaintOverlay.clear();
+                // Call parent callback for final batch update
+                config.onCellPaint?.(batch);
+            },
+            onPaintCellLive: (paintData) => {
+                // Add to live paint overlay
+                const cellKey = `${paintData.x},${paintData.y}`;
+                this.livePaintOverlay.set(cellKey, paintData);
+
+                // Update visuals immediately for live feedback
+                this.updateCellVisuals([paintData]);
+
+                // Re-render highlight to ensure it's visible on top of painted cells
+                this.refreshHighlight();
             },
             onPaintComplete: (lastCell) => {
-                // Select the last painted cell
-                if (config.onCellClick) {
+                // Use dedicated paint complete callback if available, otherwise fall back to cell click
+                if (config.onPaintComplete) {
+                    config.onPaintComplete(lastCell);
+                } else if (config.onCellClick) {
                     config.onCellClick(lastCell);
                 }
-            }
+            },
+            onStickerPlace: (position) => config.onStickerPlace?.(position)
         };
         this.eventHandler = new TownEventHandler(eventConfig, this.containers.cellGrid);
 
@@ -148,9 +165,9 @@ export class TownGridManager {
     /**
      * Updates stickers
      */
-    updateStickers(stickers: TownSticker[]): void {
+    async updateStickers(stickers: TownSticker[]): Promise<void> {
         this.stickers = stickers;
-        this.layerManager.renderStickers(this.stickers, true);
+        await this.layerManager.renderStickers(this.stickers, true);
     }
 
     /**
@@ -170,8 +187,8 @@ export class TownGridManager {
     /**
      * Sets background image
      */
-    setBackgroundImage(imageUrl: string, scale: number = 1, offsetX: number = 0, offsetY: number = 0): void {
-        this.layerManager.setBackgroundImage(imageUrl, scale, offsetX, offsetY);
+    async setBackgroundImage(imageUrl: string, scale: number = 1, offsetX: number = 0, offsetY: number = 0): Promise<void> {
+        await this.layerManager.setBackgroundImage(imageUrl, scale, offsetX, offsetY);
     }
 
     /**
@@ -179,6 +196,17 @@ export class TownGridManager {
      */
     setTool(tool: TownToolMode): void {
         this.eventHandler.updateState({ currentTool: tool });
+        this.viewportManager.setTool(tool);
+        this.updateCursor();
+    }
+
+    /**
+     * Sets the cursor for the container
+     */
+    setCursor(cursor: string): void {
+        if (this.containerNode) {
+            this.containerNode.style.cursor = cursor;
+        }
     }
 
     /**
@@ -189,21 +217,67 @@ export class TownGridManager {
     }
 
     /**
+     * Sets the selected cell and updates highlight
+     */
+    setSelectedCell(cell: { x: number; y: number } | null): void {
+        this.selectedCell = cell;
+        if (cell) {
+            this.layerManager.renderHighlight({
+                cellX: cell.x,
+                cellY: cell.y,
+                color: 0xFFD700, // Yellow highlight
+                alpha: 0.5
+            });
+        } else {
+            this.layerManager.renderHighlight(null);
+        }
+    }
+
+    /**
+     * Refreshes the current selection highlight (useful after painting)
+     */
+    private refreshHighlight(): void {
+        if (this.selectedCell) {
+            this.layerManager.renderHighlight({
+                cellX: this.selectedCell.x,
+                cellY: this.selectedCell.y,
+                color: 0xFFD700, // Yellow highlight
+                alpha: 0.5
+            });
+        }
+    }
+
+    /**
      * Updates cell visuals immediately for paint batch
      */
-    private updateCellVisuals(batch: Array<{ x: number; y: number; material: string }>): void {
-        const cellSprites = this.layerManager.getCellSprites();
-        if (!cellSprites) return;
+    /**
+     * Updates cell visuals for live painting feedback
+     */
+    private updateCellVisuals(_batch: Array<{ x: number; y: number; material: string }>): void {
+        // For live painting, we re-render the cell grid with live overlay
+        this.renderCellGridWithLivePaint();
+    }
 
-        batch.forEach(({ x, y, material }) => {
-            const cellKey = `${x},${y}`;
-            const sprite = cellSprites.get(cellKey);
-            const materialData = this.materials.find(m => m.style === material);
-            
-            if (sprite && materialData) {
-                sprite.tint = new PIXI.Color(materialData.color).toNumber();
-            }
-        });
+    /**
+     * Updates cursor based on current tool
+     */
+    private updateCursor(): void {
+        const currentTool = this.eventHandler.getCurrentTool();
+        let cursor = 'default';
+
+        switch (currentTool) {
+            case 'select':
+                cursor = 'grab';
+                break;
+            case 'paint':
+                cursor = 'url(\'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8Y2lyY2xlIGN4PSI4IiBjeT0iOCIgcj0iNCIgZmlsbD0iIzAwMCIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjEiLz4KPC9zdmc+\') 8 8, crosshair';
+                break;
+            case 'sticker':
+                cursor = 'crosshair';
+                break;
+        }
+
+        this.setCursor(cursor);
     }
 
     /**
@@ -242,9 +316,14 @@ export class TownGridManager {
     }
 
     /**
-     * Handles viewport changes (pan/zoom)
+     * Handles viewport changes (pan/zoom) with throttling
      */
     private handleViewportChange(): void {
+        const now = performance.now();
+        if (now - this.lastViewportChangeTime < this.viewportChangeThrottleMs) {
+            return; // Skip if too frequent
+        }
+        this.lastViewportChangeTime = now;
         this.requestRender();
     }
 
@@ -271,7 +350,7 @@ export class TownGridManager {
     }
 
     /**
-     * Main render method with viewport culling
+     * Main render method with viewport culling and optimization
      */
     private render(): void {
         if (!this.townData || !this.cellTexture) return;
@@ -294,6 +373,20 @@ export class TownGridManager {
             maxCellY: visibleBounds.maxCellY + buffer
         };
 
+        // Check if bounds have significantly changed to optimize rendering
+        const boundsChanged = !this.lastRenderedBounds ||
+            Math.abs(this.lastRenderedBounds.minCellX - bufferedBounds.minCellX) > 1 ||
+            Math.abs(this.lastRenderedBounds.maxCellX - bufferedBounds.maxCellX) > 1 ||
+            Math.abs(this.lastRenderedBounds.minCellY - bufferedBounds.minCellY) > 1 ||
+            Math.abs(this.lastRenderedBounds.maxCellY - bufferedBounds.maxCellY) > 1;
+
+        if (!boundsChanged && this.livePaintOverlay.size === 0) {
+            // Skip rendering if bounds haven't changed and no live painting
+            return;
+        }
+
+        this.lastRenderedBounds = { ...bufferedBounds };
+
         // Render layers with culling
         this.layerManager.renderCellGrid(
             this.townData.grid,
@@ -301,6 +394,9 @@ export class TownGridManager {
             bufferedBounds,
             this.cellTexture
         );
+
+        // Apply live paint overlay after regular rendering
+        this.applyLivePaintOverlay();
 
         this.layerManager.renderGridLines(
             this.config.layers.viewSettings.showGridLines,
@@ -312,7 +408,53 @@ export class TownGridManager {
         const renderTime = performance.now() - startTime;
         this.lastRenderTime = renderTime;
 
-        console.log(`[TownGridManager] Render completed in ${renderTime.toFixed(2)}ms`);
+        // Only log slow renders to reduce console spam
+        if (renderTime > 10) {
+            console.log(`[TownGridManager] Render completed in ${renderTime.toFixed(2)}ms`);
+        }
+    }
+
+    /**
+     * Applies live paint overlay after regular rendering
+     */
+    private applyLivePaintOverlay(): void {
+        if (this.livePaintOverlay.size === 0) return;
+
+        // Simply render a new cell grid with live paint data merged
+        this.renderCellGridWithLivePaint();
+    }
+
+    /**
+     * Renders cell grid with live paint overlay
+     */
+    private renderCellGridWithLivePaint(): void {
+        if (!this.townData || !this.cellTexture) return;
+
+        const visibleBounds = this.viewportManager.getVisibleCellBounds(
+            this.app.screen.width,
+            this.app.screen.height,
+            this.config.cellSize
+        );
+
+        // Create merged cell data with live paint overlay
+        const mergedCells: Record<string, any> = { ...this.townData.grid };
+
+        // Apply live paint overlay to merged data
+        this.livePaintOverlay.forEach((paintData) => {
+            const cellKey = `${paintData.x},${paintData.y}`;
+            mergedCells[cellKey] = {
+                ...mergedCells[cellKey],
+                material: paintData.material
+            };
+        });
+
+        // Render with merged data
+        this.layerManager.renderCellGrid(
+            mergedCells,
+            this.materials,
+            visibleBounds,
+            this.cellTexture
+        );
     }
 
     /**

@@ -6,6 +6,7 @@ interface TownListProps {
     towns: HexTile[];
     onJumpToTown: (hexId: string) => void;
     onEnterTown: (townId: string) => void;
+    onRenameTown: (townId: string, newName: string) => void;
 }
 
 interface ContextMenu {
@@ -15,9 +16,18 @@ interface ContextMenu {
     selectedTown: HexTile | null;
 }
 
-const TownList: React.FC<TownListProps> = ({ towns, onJumpToTown, onEnterTown }) => {
+interface RenameDialog {
+    visible: boolean;
+    townId: string;
+    currentName: string;
+    newName: string;
+}
+
+const TownList: React.FC<TownListProps> = ({ towns, onJumpToTown, onEnterTown, onRenameTown }) => {
     const [contextMenu, setContextMenu] = useState<ContextMenu>({ visible: false, x: 0, y: 0, selectedTown: null });
+    const [renameDialog, setRenameDialog] = useState<RenameDialog>({ visible: false, townId: '', currentName: '', newName: '' });
     const contextMenuRef = useRef<HTMLDivElement>(null);
+    const renameInputRef = useRef<HTMLInputElement>(null);
 
     const handleContextMenu = (event: React.MouseEvent, town: HexTile) => {
         event.preventDefault();
@@ -27,6 +37,51 @@ const TownList: React.FC<TownListProps> = ({ towns, onJumpToTown, onEnterTown })
     const closeContextMenu = useCallback(() => {
         setContextMenu(prev => ({ ...prev, visible: false }));
     }, []);
+
+    const openRenameDialog = useCallback((town: HexTile) => {
+        setRenameDialog({
+            visible: true,
+            townId: town.id,
+            currentName: town.townName || 'Unnamed Town',
+            newName: town.townName || 'Unnamed Town'
+        });
+        closeContextMenu();
+    }, [closeContextMenu]);
+
+    const closeRenameDialog = useCallback(() => {
+        setRenameDialog(prev => ({ ...prev, visible: false }));
+    }, []);
+
+    const handleRenameSubmit = useCallback(() => {
+        const trimmedName = renameDialog.newName.trim();
+
+        if (!trimmedName) {
+            alert('Town name cannot be empty.');
+            return;
+        }
+
+        // Check if name is already used by another town
+        const isNameTaken = towns.some(town =>
+            town.id !== renameDialog.townId &&
+            (town.townName || 'Unnamed Town').toLowerCase() === trimmedName.toLowerCase()
+        );
+
+        if (isNameTaken) {
+            alert('A town with this name already exists. Please choose a different name.');
+            return;
+        }
+
+        onRenameTown(renameDialog.townId, trimmedName);
+        closeRenameDialog();
+    }, [renameDialog, towns, onRenameTown, closeRenameDialog]);
+
+    const handleRenameKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleRenameSubmit();
+        } else if (e.key === 'Escape') {
+            closeRenameDialog();
+        }
+    }, [handleRenameSubmit, closeRenameDialog]);
 
     useEffect(() => {
         if (contextMenu.visible) {
@@ -71,6 +126,29 @@ const TownList: React.FC<TownListProps> = ({ towns, onJumpToTown, onEnterTown })
                 >
                     <div className="context-menu-item" onClick={() => { onJumpToTown(contextMenu.selectedTown!.id); closeContextMenu(); }}>Go To</div>
                     <div className="context-menu-item" onClick={() => { onEnterTown(contextMenu.selectedTown!.townId!); closeContextMenu(); }}>Enter Town</div>
+                    <div className="context-menu-item" onClick={() => openRenameDialog(contextMenu.selectedTown!)}>Rename</div>
+                </div>
+            )}
+
+            {renameDialog.visible && (
+                <div className="rename-dialog-overlay" onClick={closeRenameDialog}>
+                    <div className="rename-dialog" onClick={(e) => e.stopPropagation()}>
+                        <h3>Rename Town</h3>
+                        <p>Current name: <strong>{renameDialog.currentName}</strong></p>
+                        <input
+                            ref={renameInputRef}
+                            type="text"
+                            value={renameDialog.newName}
+                            onChange={(e) => setRenameDialog(prev => ({ ...prev, newName: e.target.value }))}
+                            onKeyDown={handleRenameKeyDown}
+                            placeholder="Enter new town name"
+                            autoFocus
+                        />
+                        <div className="rename-dialog-buttons">
+                            <button onClick={handleRenameSubmit}>OK</button>
+                            <button onClick={closeRenameDialog}>Cancel</button>
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

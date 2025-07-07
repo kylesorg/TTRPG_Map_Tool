@@ -329,47 +329,47 @@ const BiomeSelector: React.FC<BiomeSelectorProps> = ({
                                 />
                             </div>
                         )}
-
-                        {/* Color Picker Modal */}
-                        {editingBiome?.name === biome.name && (
-                            <div style={{
-                                position: 'fixed',
-                                zIndex: 9999,
-                                left: '50%',
-                                top: '50%',
-                                transform: 'translate(-50%, -50%)',
-                                background: '#fff',
-                                border: '1px solid #ccc',
-                                borderRadius: '8px',
-                                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                                padding: '16px',
-                            }}>
-                                <div style={cover} onClick={handleClosePicker} />
-                                <SketchPicker
-                                    color={editingBiome.color || '#808080'}
-                                    onChange={handleColorChange}
-                                    disableAlpha={false}
-                                />
-                                <button
-                                    style={{
-                                        marginTop: '8px',
-                                        width: '100%',
-                                        padding: '6px',
-                                        background: '#2196F3',
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '4px',
-                                        cursor: 'pointer'
-                                    }}
-                                    onClick={handleClosePicker}
-                                >
-                                    Done
-                                </button>
-                            </div>
-                        )}
                     </div>
                 ))}
             </div>
+
+            {/* Color Picker Modal */}
+            {editingBiome && (
+                <div style={{
+                    position: 'fixed',
+                    zIndex: 9999,
+                    left: '50%',
+                    top: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    background: '#fff',
+                    border: '1px solid #ccc',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                    padding: '16px',
+                }}>
+                    <div style={cover} onClick={handleClosePicker} />
+                    <SketchPicker
+                        color={editingBiome.color || '#808080'}
+                        onChange={handleColorChange}
+                        disableAlpha={false}
+                    />
+                    <button
+                        style={{
+                            marginTop: '8px',
+                            width: '100%',
+                            padding: '6px',
+                            background: '#2196F3',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer'
+                        }}
+                        onClick={handleClosePicker}
+                    >
+                        Done
+                    </button>
+                </div>
+            )}
 
             {/* Context Menu */}
             {contextMenu && (
@@ -378,12 +378,13 @@ const BiomeSelector: React.FC<BiomeSelectorProps> = ({
                         position: 'fixed',
                         left: contextMenu.x,
                         top: contextMenu.y,
-                        background: 'white',
-                        border: '1px solid #ccc',
+                        background: '#2a2a2a', // Dark background for better contrast
+                        border: '1px solid #555',
                         borderRadius: '4px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
                         zIndex: 10000,
-                        minWidth: '120px'
+                        minWidth: '120px',
+                        color: '#fff' // Ensure text is white on dark background
                     }}
                     onClick={(e) => e.stopPropagation()}
                 >
@@ -393,10 +394,17 @@ const BiomeSelector: React.FC<BiomeSelectorProps> = ({
                             padding: '8px 12px',
                             cursor: 'pointer',
                             fontSize: '12px',
-                            borderBottom: '1px solid #eee'
+                            borderBottom: '1px solid #555',
+                            color: '#fff' // Explicit white text
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#3a3a3a';
+                            e.currentTarget.style.color = '#fff';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.color = '#fff';
+                        }}
                     >
                         Rename
                     </div>
@@ -406,10 +414,16 @@ const BiomeSelector: React.FC<BiomeSelectorProps> = ({
                             padding: '8px 12px',
                             cursor: 'pointer',
                             fontSize: '12px',
-                            color: '#d32f2f'
+                            color: '#ff6b6b' // Light red for delete action
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.background = '#f0f0f0'}
-                        onMouseLeave={(e) => e.currentTarget.style.background = 'white'}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.background = '#3a3a3a';
+                            e.currentTarget.style.color = '#ff6b6b';
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.color = '#ff6b6b';
+                        }}
                     >
                         Delete
                     </div>

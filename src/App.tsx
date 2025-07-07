@@ -4,28 +4,31 @@ import './App.css';
 import HexGridWebGL from './components/WorldMap/HexGridWebGL';
 import HexDetailPanel from './components/WorldMap/HexDetailPanel';
 import WorldMapTools from './components/WorldMap/WorldMapTools';
-import type { HexTile, Biome, ToolMode, TownMaterial, DrawingPath } from './types/mapTypes';
-import type { TownData, TownSizeCategory, TownCellCoordinates, TownCell, SelectedTownCell } from './types/townTypes';
+import type { HexTile, Biome, ToolMode, TownMaterial, DrawingPath, DrawingType } from './types/mapTypes';
+import type { TownData, TownSizeCategory, TownCellCoordinates, TownCell, SelectedTownCell, TownSticker } from './types/townTypes';
 import { TOWN_SIZE_DETAILS } from './types/townTypes';
 import TownGridWebGLV2 from './components/TownView/TownGridWebGLV2';
 import TownCellDetailPanel from './components/TownView/TownCellDetailPanel';
 import TownMaterialSelector from './components/TownView/TownMaterialSelector';
+import TownImageTools from './components/TownView/TownImageTools';
 import { generateTestHexGrid, getInitialCenterHexId } from './utils/gridHelpers';
 import { GRID_ROWS, GRID_COLS, UNASSIGNED_BIOME, setAllBiomes as setGlobalBiomes } from './utils/constants';
 import { userToAxial, type HexOrientation } from './utils/hexMath';
+import { MapDataManager, type ComprehensiveMapData } from './utils/mapDataManager';
+import { generateUniqueMapKey, isDefaultKey } from './utils/mapKeyGenerator';
 
 function App() {
   const [hexGrid, setHexGrid] = useState<Map<string, HexTile>>(() => new Map());
   const [hexGridVersion, setHexGridVersion] = useState(0); // Force re-renders
   const [selectedHex, setSelectedHex] = useState<HexTile | null>(null);
   const [currentTool, setCurrentTool] = useState<ToolMode>('select');
-  const [currentTownTool, setCurrentTownTool] = useState<'select' | 'paint'>('select');
+  const [currentTownTool, setCurrentTownTool] = useState<'select' | 'paint' | 'sticker'>('select');
   const [currentSelectedBiome, setCurrentSelectedBiome] = useState<Biome>(UNASSIGNED_BIOME);
   const [currentSelectedTownMaterial, setCurrentSelectedTownMaterial] = useState<TownMaterial | null>(null);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(true);
   const [isTownToolsPanelOpen] = useState(true); // Removed setter
   const [isDetailsPanelOpen, setIsDetailsPanelOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'worldEdit' | 'importExport'>('worldEdit');
+  const [activeTab, setActiveTab] = useState<'worldEdit' | 'view' | 'importExport'>('worldEdit');
   const [biomesLoaded, setBiomesLoaded] = useState(false);
   const [availableBiomes, setAvailableBiomes] = useState<Biome[]>([UNASSIGNED_BIOME]);
   const defaultHexInitiallySetRef = useRef(false);
@@ -47,6 +50,21 @@ function App() {
   // Hex orientation state (NEW - additive only, defaults to current behavior)
   const [hexOrientation, setHexOrientation] = useState<HexOrientation>('flat-top');
 
+  // Map data management
+  const [currentMapKey, setCurrentMapKey] = useState<string>('default_map');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isInitialLoad, setIsInitialLoad] = useState<boolean>(true); // Track if we're in initial app load
+  const [hasUserMadeEdits, setHasUserMadeEdits] = useState<boolean>(false); // Track if user has made actual edits
+  const mapDataManagerRef = useRef<MapDataManager | null>(null);
+
+  // Initialize map data manager
+  useEffect(() => {
+    if (!mapDataManagerRef.current) {
+      mapDataManagerRef.current = new MapDataManager();
+    }
+  }, []);
+
   // Geography tool state
   const [brushSize, setBrushSize] = useState(3.125); // Default to medium brush size
   const [brushColor, setBrushColor] = useState('#000000'); // Default to black
@@ -66,17 +84,28 @@ function App() {
   const [backgroundImageOffsetY, setBackgroundImageOffsetY] = useState(0);
   const [backgroundImageVisible, setBackgroundImageVisible] = useState(true);
 
+  // Town background image and sticker state
+  const [townBackgroundImageUrl, setTownBackgroundImageUrl] = useState<string | null>(null);
+  const [townBackgroundImageScale, setTownBackgroundImageScale] = useState(1);
+  const [townBackgroundImageOffsetX, setTownBackgroundImageOffsetX] = useState(0);
+  const [townBackgroundImageOffsetY, setTownBackgroundImageOffsetY] = useState(0);
+  const [townBackgroundImageVisible, setTownBackgroundImageVisible] = useState(true);
+  const [townStickers, setTownStickers] = useState<TownSticker[]>([]);
+  const [selectedTownSticker, setSelectedTownSticker] = useState<TownSticker | null>(null);
+  const [townStickersVisible, setTownStickersVisible] = useState(true);
+
   // Town related state
   const [towns, setTowns] = useState<Map<string, TownData>>(new Map());
   const [currentView, setCurrentView] = useState<'world' | 'town'>('world');
   const [activeTownId, setActiveTownId] = useState<string | null>(null);
   const [selectedTownCell, setSelectedTownCell] = useState<SelectedTownCell | null>(null);
+  const [townCopied, setTownCopied] = useState(false);
 
   const [townViewDisplay, setTownViewDisplay] = useState({ zoom: 1, visibleCells: 0 });
 
   // Town materials state
   const DEFAULT_TOWN_MATERIALS: TownMaterial[] = [
-    { name: 'Default', style: 'default', color: '#CCCCCC', type: 'ground' },
+    { name: 'Default', style: 'default', color: 'rgba(255, 255, 255, 0)', type: 'ground' }, // Fully transparent
     { name: 'Grass', style: 'grass', color: '#90EE90', type: 'ground' },
     { name: 'Road', style: 'road', color: '#8B4513', type: 'ground' },
     { name: 'Path', style: 'path', color: '#D2B48C', type: 'ground' },
@@ -84,7 +113,7 @@ function App() {
     { name: 'Wood', style: 'wood', color: '#DEB887', type: 'ground' },
     { name: 'Dirt', style: 'dirt', color: '#8B4513', type: 'ground' },
   ];
-  const [availableTownMaterials] = useState<TownMaterial[]>(DEFAULT_TOWN_MATERIALS); // Removed setter
+  const [availableTownMaterials, setAvailableTownMaterials] = useState<TownMaterial[]>(DEFAULT_TOWN_MATERIALS);
 
   const handleBiomeColorChange = useCallback((biomeName: string, newColor: string) => {
     const newAvailableBiomes = availableBiomes.map(b =>
@@ -134,6 +163,20 @@ function App() {
       return newGrid;
     });
   }, [availableBiomes, currentSelectedBiome, selectedHex]);
+
+  const handleTownMaterialColorChange = useCallback((materialName: string, newColor: string) => {
+    const newAvailableMaterials = availableTownMaterials.map(m =>
+      m.name === materialName ? { ...m, color: newColor } : m
+    );
+    setAvailableTownMaterials(newAvailableMaterials);
+
+    const updatedMaterial = newAvailableMaterials.find(m => m.name === materialName);
+    if (!updatedMaterial) return;
+
+    if (currentSelectedTownMaterial?.name === materialName) {
+      setCurrentSelectedTownMaterial(updatedMaterial);
+    }
+  }, [availableTownMaterials, currentSelectedTownMaterial]);
 
   const handleBiomeAdd = useCallback((biomeName: string, color: string) => {
     const newBiome: Biome = { name: biomeName, color };
@@ -368,6 +411,434 @@ function App() {
     });
   }, [activeTownId]);
 
+  // Town sticker handlers
+  const handleStickerAdd = useCallback((sticker: TownSticker) => {
+    setTownStickers(prev => [...prev, sticker]);
+  }, []);
+
+  const handleStickerUpdate = useCallback((sticker: TownSticker) => {
+    setTownStickers(prev => prev.map(s => s.id === sticker.id ? sticker : s));
+  }, []);
+
+  const handleStickerDelete = useCallback((stickerId: string) => {
+    setTownStickers(prev => prev.filter(s => s.id !== stickerId));
+    if (selectedTownSticker?.id === stickerId) {
+      setSelectedTownSticker(null);
+    }
+  }, [selectedTownSticker]);
+
+  const handleBackgroundImageUpdate = useCallback((imageUrl: string | null) => {
+    setTownBackgroundImageUrl(imageUrl);
+  }, []);
+
+  // Map data management functions
+  const handleLoadMap = useCallback(async (mapKey: string): Promise<boolean> => {
+    try {
+      // Set initial load state when loading a map
+      setIsInitialLoad(true);
+      setHasUserMadeEdits(false); // Reset edit tracking for loaded map
+
+      const result = await MapDataManager.loadMapData(mapKey);
+      if (!result.success || !result.data) {
+        console.error('Failed to load map data');
+        setIsInitialLoad(false);
+        return false;
+      }
+
+      const mapData = result.data;
+
+      // Update all app state with loaded data
+      setCurrentMapKey(mapKey);
+
+      // Update hex grid
+      if (mapData.worldMap?.hexes) {
+        const hexMap = new Map<string, HexTile>();
+        Object.entries(mapData.worldMap.hexes).forEach(([hexId, hexData]) => {
+          // Find the biome object from available biomes
+          const biomeObj = availableBiomes.find(b => b.name === hexData.biome) || UNASSIGNED_BIOME;
+          const originalBiomeObj = hexData.originalBiome ?
+            availableBiomes.find(b => b.name === hexData.originalBiome) : undefined;
+
+          const hex: HexTile = {
+            id: hexId,
+            coordinates: hexData.coordinates,
+            biome: biomeObj,
+            originalBiome: originalBiomeObj,
+            encounters: [], // Initialize with empty encounters
+            notes: hexData.notes || '',
+            encounterNotes: hexData.encounterNotes || '',
+            isTown: hexData.isTown || false,
+            townName: hexData.townName,
+            townSize: hexData.townSize as any
+          };
+          hexMap.set(hexId, hex);
+        });
+        setHexGrid(hexMap);
+        setHexGridVersion(prev => prev + 1);
+      }
+
+      // Update biomes
+      if (mapData.biomes) {
+        const biomes = Object.values(mapData.biomes);
+        setAvailableBiomes(biomes);
+        setGlobalBiomes(biomes.filter(b => b.name !== UNASSIGNED_BIOME.name));
+      }
+
+      // Update town data (simplified - skip for now due to type complexity)
+      if (mapData.towns) {
+        // Skip town loading for now - will need proper type conversion
+        console.log('Town data found but skipping load due to type compatibility');
+      }
+
+      // Update background image
+      if (mapData.worldMap?.backgroundImage) {
+        const bgImg = mapData.worldMap.backgroundImage;
+        setBackgroundImageUrl(`/map_data/map_${mapKey}/${bgImg.filename}`);
+        setBackgroundImageScale(bgImg.scale);
+        setBackgroundImageOffsetX(bgImg.offsetX);
+        setBackgroundImageOffsetY(bgImg.offsetY);
+        setBackgroundImageVisible(bgImg.visible);
+      }
+
+      // Update geography layer
+      if (mapData.geography?.layers) {
+        // Convert geography layers to drawing paths format
+        const paths: DrawingPath[] = mapData.geography.layers.map(layer => ({
+          id: layer.id,
+          type: 'road' as DrawingType,
+          points: layer.coordinates,
+          color: layer.style.color,
+          strokeWidth: layer.style.strokeWidth
+        }));
+        setDrawingLayer(paths);
+      }
+
+      // Update hex orientation
+      if (mapData.orientation) {
+        setHexOrientation(mapData.orientation);
+      }
+
+      // Mark load as complete after a brief delay
+      setTimeout(() => {
+        setIsInitialLoad(false);
+        console.log('🚀 Map load complete - auto-save and unsaved change tracking now enabled');
+      }, 100);
+
+      console.log('Map loaded successfully:', mapKey);
+      return true;
+    } catch (error) {
+      console.error('Error loading map:', error);
+      setIsInitialLoad(false);
+      return false;
+    }
+  }, [availableBiomes]);
+
+  const handleSaveMap = useCallback(async (): Promise<boolean> => {
+    // Skip if already saving
+    if (isSaving) {
+      console.log('⏳ Save already in progress, skipping...');
+      return false;
+    }
+
+    const saveStartTime = performance.now();
+    console.log('💾 Starting map save process...', { mapKey: currentMapKey, hexCount: hexGrid.size });
+
+    try {
+      setIsSaving(true);
+
+      // Ensure we have a valid, non-default map key
+      let saveMapKey = currentMapKey;
+      let isNewMap = false;
+      console.log(`🔍 Save process: mapKey=${saveMapKey}, isDefaultKey=${isDefaultKey(currentMapKey)}`);
+
+      if (isDefaultKey(currentMapKey)) {
+        console.log('🔑 Generating new unique map key for first save...');
+        const keyGenStart = performance.now();
+        saveMapKey = await generateUniqueMapKey();
+        console.log(`✅ Generated new map key: ${saveMapKey} (${(performance.now() - keyGenStart).toFixed(2)}ms)`);
+        setCurrentMapKey(saveMapKey);
+        isNewMap = true;
+      }
+
+      // Initialize map data manager with the save key
+      const initStart = performance.now();
+      await MapDataManager.initializeMap(saveMapKey, isNewMap);
+      console.log(`📁 Map data manager initialized (${(performance.now() - initStart).toFixed(2)}ms)`);
+
+      // Compile comprehensive map data in the expected format
+      const compileStart = performance.now();
+      const hexesData: Record<string, any> = {};
+      hexGrid.forEach((hex, hexId) => {
+        hexesData[hexId] = {
+          coordinates: hex.coordinates,
+          biome: hex.biome.name,
+          originalBiome: hex.originalBiome?.name,
+          notes: hex.notes,
+          encounterNotes: hex.encounterNotes,
+          isTown: hex.isTown,
+          townName: hex.townName,
+          townSize: hex.townSize
+        };
+      });
+
+      const biomesData: Record<string, any> = {};
+      availableBiomes.forEach(biome => {
+        biomesData[biome.name] = biome;
+      });
+
+      const townMaterialsData: Record<string, any> = {};
+      availableTownMaterials.forEach(material => {
+        townMaterialsData[material.name] = material;
+      });
+
+      const townsData: Record<string, any> = {};
+      towns.forEach((town, townId) => {
+        townsData[townId] = town;
+      });
+
+      const mapData: ComprehensiveMapData = {
+        mapKey: saveMapKey,
+        version: '2.0.0',
+        lastUpdated: new Date().toISOString(),
+        createdDate: new Date().toISOString(),
+        orientation: hexOrientation,
+        worldMap: {
+          name: `Map ${saveMapKey}`,
+          backgroundImage: backgroundImageUrl ? {
+            filename: backgroundImageUrl.split('/').pop() || '',
+            scale: backgroundImageScale,
+            offsetX: backgroundImageOffsetX,
+            offsetY: backgroundImageOffsetY,
+            visible: backgroundImageVisible
+          } : undefined,
+          hexes: hexesData
+        },
+        biomes: biomesData,
+        townMaterials: townMaterialsData,
+        towns: townsData,
+        geography: {
+          layers: drawingLayer.map(path => ({
+            id: path.id,
+            type: 'path' as const,
+            coordinates: path.points,
+            style: {
+              color: path.color || '#000000',
+              strokeWidth: path.strokeWidth || 2,
+              opacity: 1
+            }
+          })),
+          visible: geographyVisible
+        }
+      };
+      console.log(`📊 Map data compiled (${(performance.now() - compileStart).toFixed(2)}ms)`, {
+        hexes: Object.keys(hexesData).length,
+        biomes: Object.keys(biomesData).length,
+        towns: Object.keys(townsData).length
+      });
+
+      // Update the map data in the manager
+      const updateStart = performance.now();
+      MapDataManager.updateMapData(mapData);
+      console.log(`🔄 Map data updated in manager (${(performance.now() - updateStart).toFixed(2)}ms)`);
+
+      // Force save
+      const saveApiStart = performance.now();
+      const success = await MapDataManager.forceSave();
+      console.log(`📤 API save completed (${(performance.now() - saveApiStart).toFixed(2)}ms)`);
+
+      if (success) {
+        const totalTime = performance.now() - saveStartTime;
+        console.log(`✅ Map saved successfully: ${saveMapKey} (Total: ${totalTime.toFixed(2)}ms)`);
+        setHasUnsavedChanges(false);
+        setHasUserMadeEdits(false); // Reset edit tracking after successful save
+        return true;
+      } else {
+        console.error('❌ Failed to save map');
+        return false;
+      }
+    } catch (error) {
+      const totalTime = performance.now() - saveStartTime;
+      console.error(`❌ Error saving map (${totalTime.toFixed(2)}ms):`, error);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [isSaving, hexOrientation, availableBiomes, availableTownMaterials, backgroundImageUrl, backgroundImageScale, backgroundImageOffsetX, backgroundImageOffsetY, backgroundImageVisible, hexGrid, towns, drawingLayer, geographyVisible, currentMapKey]);
+
+  // New function to save map with specific key (for auto-save and new map creation)
+  const handleSaveMapWithKey = useCallback(async (mapKey: string, isNewMap: boolean = false): Promise<boolean> => {
+    // Skip if already saving
+    if (isSaving) {
+      console.log('⏳ Save already in progress, skipping...');
+      return false;
+    }
+
+    const saveStartTime = performance.now();
+    console.log('💾 Starting map save process...', { mapKey, hexCount: hexGrid.size, isNewMap });
+
+    try {
+      setIsSaving(true);
+
+      // Initialize map data manager with the save key
+      const initStart = performance.now();
+      await MapDataManager.initializeMap(mapKey, isNewMap);
+      console.log(`📁 Map data manager initialized (${(performance.now() - initStart).toFixed(2)}ms)`);
+
+      // Compile comprehensive map data in the expected format
+      const compileStart = performance.now();
+      const hexesData: Record<string, any> = {};
+      hexGrid.forEach((hex, hexId) => {
+        hexesData[hexId] = {
+          coordinates: hex.coordinates,
+          biome: hex.biome.name,
+          originalBiome: hex.originalBiome?.name,
+          notes: hex.notes,
+          encounterNotes: hex.encounterNotes,
+          isTown: hex.isTown,
+          townName: hex.townName,
+          townSize: hex.townSize
+        };
+      });
+
+      const biomesData: Record<string, any> = {};
+      availableBiomes.forEach(biome => {
+        biomesData[biome.name] = biome;
+      });
+
+      const townMaterialsData: Record<string, any> = {};
+      availableTownMaterials.forEach(material => {
+        townMaterialsData[material.name] = material;
+      });
+
+      const townsData: Record<string, any> = {};
+      towns.forEach((town, townId) => {
+        townsData[townId] = town;
+      });
+
+      const mapData: ComprehensiveMapData = {
+        mapKey: mapKey,
+        version: '2.0.0',
+        lastUpdated: new Date().toISOString(),
+        createdDate: new Date().toISOString(),
+        orientation: hexOrientation,
+        worldMap: {
+          name: `Map ${mapKey}`,
+          backgroundImage: backgroundImageUrl ? {
+            filename: backgroundImageUrl.split('/').pop() || '',
+            scale: backgroundImageScale,
+            offsetX: backgroundImageOffsetX,
+            offsetY: backgroundImageOffsetY,
+            visible: backgroundImageVisible
+          } : undefined,
+          hexes: hexesData
+        },
+        biomes: biomesData,
+        townMaterials: townMaterialsData,
+        towns: townsData,
+        geography: {
+          layers: drawingLayer.map(path => ({
+            id: path.id,
+            type: 'path' as const,
+            coordinates: path.points,
+            style: {
+              color: path.color || '#000000',
+              strokeWidth: path.strokeWidth || 2,
+              opacity: 1
+            }
+          })),
+          visible: geographyVisible
+        }
+      };
+      console.log(`📊 Map data compiled (${(performance.now() - compileStart).toFixed(2)}ms)`, {
+        hexes: Object.keys(hexesData).length,
+        biomes: Object.keys(biomesData).length,
+        towns: Object.keys(townsData).length
+      });
+
+      // Update the map data in the manager
+      const updateStart = performance.now();
+      MapDataManager.updateMapData(mapData);
+      console.log(`🔄 Map data updated in manager (${(performance.now() - updateStart).toFixed(2)}ms)`);
+
+      // Force save
+      const saveApiStart = performance.now();
+      const success = await MapDataManager.forceSave();
+      console.log(`📤 API save completed (${(performance.now() - saveApiStart).toFixed(2)}ms)`);
+
+      if (success) {
+        const totalTime = performance.now() - saveStartTime;
+        console.log(`✅ Map saved successfully: ${mapKey} (Total: ${totalTime.toFixed(2)}ms)`);
+        return true;
+      } else {
+        console.error('❌ Failed to save map');
+        return false;
+      }
+    } catch (error) {
+      const totalTime = performance.now() - saveStartTime;
+      console.error(`❌ Error saving map (${totalTime.toFixed(2)}ms):`, error);
+      return false;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [isSaving, hexOrientation, availableBiomes, availableTownMaterials, backgroundImageUrl, backgroundImageScale, backgroundImageOffsetX, backgroundImageOffsetY, backgroundImageVisible, hexGrid, towns, drawingLayer, geographyVisible]);
+
+  const handleNewMap = useCallback(async () => {
+    // First, save current map if it has changes and isn't a default key
+    if (hasUnsavedChanges && !isDefaultKey(currentMapKey)) {
+      const shouldSave = window.confirm('Save current map before creating new one?');
+      if (shouldSave) {
+        await handleSaveMap();
+      }
+    }
+
+    // Set initial load state during reset
+    setIsInitialLoad(true);
+    setHasUserMadeEdits(false); // Reset edit tracking for new map
+
+    // Reset to a fresh default state
+    setCurrentMapKey('default_map');
+    setHexGrid(new Map());
+    setTowns(new Map());
+    setDrawingLayer([]);
+    setBackgroundImageUrl(null);
+    setBackgroundImageScale(1);
+    setBackgroundImageOffsetX(0);
+    setBackgroundImageOffsetY(0);
+    setBackgroundImageVisible(true);
+    setHasUnsavedChanges(false);
+    setHexGridVersion(prev => prev + 1);
+
+    // Reload default biomes from biomes.json
+    try {
+      const response = await fetch('/biomes.json');
+      const defaultBiomesData: Biome[] = await response.json();
+      const allDefaultBiomes = [UNASSIGNED_BIOME, ...defaultBiomesData].sort((a, b) => a.name.localeCompare(b.name));
+      setAvailableBiomes(allDefaultBiomes);
+      setGlobalBiomes(defaultBiomesData);
+
+      // Reset selected biome to unassigned
+      setCurrentSelectedBiome(UNASSIGNED_BIOME);
+
+      console.log('🔄 Default biomes reloaded for new map');
+    } catch (error) {
+      console.error('Failed to reload default biomes:', error);
+    }
+
+    // Regenerate the initial hex grid
+    const initialHexArray = generateTestHexGrid(GRID_ROWS, GRID_COLS, hexOrientation);
+    const initialHexMap = new Map<string, HexTile>();
+    initialHexArray.forEach(hex => initialHexMap.set(hex.id, hex));
+    setHexGrid(initialHexMap);
+
+    // Mark initial load as complete after a brief delay
+    setTimeout(() => {
+      setIsInitialLoad(false);
+      console.log('🚀 New map initial load complete - auto-save and unsaved change tracking now enabled');
+    }, 100);
+
+    console.log('New map created - reset to default state');
+  }, [hasUnsavedChanges, currentMapKey, handleSaveMap, hexOrientation]);
+
   const handleGoTo = () => {
     const col = parseInt(gotoX, 10);
     const row = parseInt(gotoY, 10);
@@ -414,6 +885,12 @@ function App() {
             defaultHexInitiallySetRef.current = true;
           }
         }
+
+        // Mark initial load as complete after grid generation
+        setTimeout(() => {
+          setIsInitialLoad(false);
+          console.log('🚀 Initial load complete - auto-save and unsaved change tracking now enabled');
+        }, 100);
       })
       .catch(error => console.error("Could not load biomes:", error));
   }, []);
@@ -646,6 +1123,43 @@ function App() {
     }
   }, [hexGrid, activeTownId]);
 
+  const handleRenameTown = useCallback((townId: string, newName: string) => {
+    // Find the hex that corresponds to this town
+    const townHex = Array.from(hexGrid.values()).find(hex => hex.townId === townId);
+    if (!townHex) return;
+
+    // Update the hex grid with the new town name
+    setHexGrid(prevGrid => {
+      const newGrid = new Map(prevGrid);
+      const updatedHex = { ...townHex, townName: newName };
+      newGrid.set(townHex.id, updatedHex);
+      return newGrid;
+    });
+
+    // Update the town data as well
+    setTowns(prevTowns => {
+      const newTowns = new Map(prevTowns);
+      const townData = newTowns.get(townId);
+      if (townData) {
+        const updatedTownData = { ...townData, name: newName };
+        newTowns.set(townId, updatedTownData);
+      }
+      return newTowns;
+    });
+
+    // Force a re-render
+    setHexGridVersion(prev => prev + 1);
+  }, [hexGrid]);
+
+  // Mark as unsaved on any relevant change (but not during initial load)
+  useEffect(() => {
+    if (!isSaving && !isInitialLoad) {
+      setHasUnsavedChanges(true);
+      setHasUserMadeEdits(true); // User has made actual edits
+    }
+    // eslint-disable-next-line
+  }, [hexGrid, towns, availableBiomes, drawingLayer, backgroundImageUrl, currentMapKey]);
+
   const hexListForGrid = useMemo(() => {
     const hexArray = Array.from(hexGrid.values());
     // console.log('[App] Creating hexListForGrid, count:', hexArray.length, 'hexGrid.size:', hexGrid.size, 'version:', hexGridVersion);
@@ -663,9 +1177,12 @@ function App() {
     selectedHexCoordsRef.current = selectedHex ? { x: selectedHex.labelX, y: selectedHex.labelY } : null;
   }, [selectedHex]);
 
-  // Regenerate grid when orientation changes
+  // Regenerate grid when orientation changes (but not during initial biome loading)
   useEffect(() => {
-    if (biomesLoaded) {
+    if (biomesLoaded && defaultHexInitiallySetRef.current) {
+      // Set initial load state during orientation change
+      setIsInitialLoad(true);
+
       // Remember the current selection's user coordinates before changing orientation
       const currentUserCoords = selectedHexCoordsRef.current;
 
@@ -733,8 +1250,66 @@ function App() {
         setSelectedHex(null);
         setIsDetailsPanelOpen(false);
       }
+
+      // Mark orientation change as complete after a brief delay
+      setTimeout(() => {
+        setIsInitialLoad(false);
+        console.log('🚀 Orientation change complete - auto-save and unsaved change tracking now enabled');
+      }, 100);
     }
   }, [hexOrientation, biomesLoaded]);
+
+  // Smart auto-save with batching and collision avoidance
+  useEffect(() => {
+    const autoSaveTimer = setTimeout(async () => {
+      // Skip if currently saving or during initial load
+      if (isSaving || isInitialLoad) {
+        if (isInitialLoad) {
+          console.log('⏳ Auto-save skipped - initial load in progress');
+        } else {
+          console.log('⏳ Auto-save skipped - save already in progress');
+        }
+        return;
+      }
+
+      // Only auto-save if we have meaningful data AND user has made actual edits
+      if (hexGrid.size > 0 && hasUserMadeEdits) {
+        if (isDefaultKey(currentMapKey)) {
+          // For default keys, generate a new map key and save immediately
+          console.log('🆕 Changes detected on default map - generating new map key and saving...');
+          try {
+            const newMapKey = await generateUniqueMapKey();
+
+            // Perform the save operation directly with the new key
+            console.log('💾 Starting immediate save for new map:', newMapKey);
+            const saveSuccess = await handleSaveMapWithKey(newMapKey, true); // true = isNewMap
+
+            if (saveSuccess) {
+              setCurrentMapKey(newMapKey);
+              setHasUnsavedChanges(false);
+              setHasUserMadeEdits(false);
+              console.log(`✅ New map saved and key updated: ${newMapKey}`);
+            }
+          } catch (error) {
+            console.error('❌ Failed to generate new map key and save:', error);
+            setHasUnsavedChanges(true);
+          }
+        } else if (hasUnsavedChanges) {
+          // For non-default keys with changes, trigger auto-save
+          console.log('💾 Auto-save triggered for existing map:', currentMapKey);
+          try {
+            await handleSaveMap();
+          } catch (error) {
+            console.error('❌ Auto-save failed:', error);
+          }
+        }
+      }
+    }, 3000); // 3-second debounce for auto-save
+
+    return () => clearTimeout(autoSaveTimer);
+  }, [hexGrid, towns, availableBiomes, drawingLayer, backgroundImageUrl, currentMapKey, hasUnsavedChanges, isSaving, isInitialLoad, hasUserMadeEdits, handleSaveMap, handleSaveMapWithKey]);
+
+  // Remove the old periodic save - we now have smart batching in the main auto-save
 
   if (currentView === 'town' && activeTownId) {
     const currentTownData = towns.get(activeTownId);
@@ -755,7 +1330,58 @@ function App() {
           <div className="town-tools-left-panel floating-panel">
             <div className="tabs">
               <button className={activeTab === 'worldEdit' ? 'active' : ''} onClick={() => setActiveTab('worldEdit')}>Town Edit</button>
+              <button className={activeTab === 'view' ? 'active' : ''} onClick={() => setActiveTab('view')}>View</button>
               <button className={activeTab === 'importExport' ? 'active' : ''} onClick={() => setActiveTab('importExport')}>Import/Export</button>
+            </div>
+
+            {/* Map Key Display */}
+            <div style={{
+              padding: '8px 12px',
+              backgroundColor: '#2a2a2a',
+              borderBottom: '1px solid #444',
+              fontSize: '12px',
+              color: '#ccc',
+              fontFamily: 'monospace',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <span>
+                <strong style={{ color: '#fff' }}>Map:</strong> {currentMapKey || 'default_map'}
+                {hasUnsavedChanges && !isDefaultKey(currentMapKey || 'default_map') && (
+                  <span style={{
+                    marginLeft: '8px',
+                    padding: '2px 6px',
+                    backgroundColor: '#ffc107',
+                    color: '#000',
+                    fontSize: '9px',
+                    borderRadius: '3px',
+                    fontWeight: 'bold'
+                  }}>
+                    UNSAVED
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(currentMapKey || 'default_map');
+                  setTownCopied(true);
+                  setTimeout(() => setTownCopied(false), 5000);
+                }}
+                style={{
+                  padding: '2px 6px',
+                  fontSize: '10px',
+                  backgroundColor: townCopied ? '#28a745' : '#444',
+                  color: townCopied ? '#fff' : '#ccc',
+                  border: '1px solid #666',
+                  borderRadius: '3px',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s, color 0.2s'
+                }}
+                title="Copy map key to clipboard"
+              >
+                {townCopied ? '✔ Copied' : 'Copy'}
+              </button>
             </div>
             {activeTab === 'worldEdit' && (
               <>
@@ -770,18 +1396,46 @@ function App() {
                   <h4>Tools</h4>
                   <button onClick={() => setCurrentTownTool('select')} className={`panel-button ${currentTownTool === 'select' ? 'active' : ''}`}>Select Cell</button>
                   <button onClick={() => { setCurrentTownTool('paint'); if (!currentSelectedTownMaterial) setCurrentSelectedTownMaterial(availableTownMaterials[0]); }} className={`panel-button ${currentTownTool === 'paint' ? 'active' : ''}`}>Paint Cell</button>
+                  <button onClick={() => setCurrentTownTool('sticker')} className={`panel-button ${currentTownTool === 'sticker' ? 'active' : ''}`}>Place Sticker</button>
                 </div>
                 {currentTownTool === 'paint' && (
                   <TownMaterialSelector
                     availableMaterials={availableTownMaterials}
                     onMaterialSelect={setCurrentSelectedTownMaterial}
                     selectedMaterialName={currentSelectedTownMaterial?.name}
-                    onMaterialColorChange={(materialName, newColor) => {
-                      // TODO: Implement material color changes if needed
-                      console.log('Material color change:', materialName, newColor);
-                    }}
+                    onMaterialColorChange={handleTownMaterialColorChange}
                   />
                 )}
+                <div className="tool-section">
+                  <p>Zoom: {townViewDisplay.zoom.toFixed(2)}x</p>
+                  <p>Rendered Cells: {townViewDisplay.visibleCells}</p>
+                </div>
+              </>
+            )}
+            {activeTab === 'view' && (
+              <>
+                <TownImageTools
+                  townId={currentTownData.id}
+                  townCoordinates={currentTownData.originHexCoordinates}
+                  stickers={townStickers}
+                  onStickerAdd={handleStickerAdd}
+                  onStickerUpdate={handleStickerUpdate}
+                  onStickerDelete={handleStickerDelete}
+                  onBackgroundImageUpdate={handleBackgroundImageUpdate}
+                  selectedSticker={selectedTownSticker}
+                  onSelectSticker={setSelectedTownSticker}
+                  showStickers={townStickersVisible}
+                  onToggleStickers={setTownStickersVisible}
+                  showBackgroundImage={townBackgroundImageVisible}
+                  onToggleBackgroundImage={setTownBackgroundImageVisible}
+                  backgroundImageUrl={townBackgroundImageUrl}
+                  backgroundImageScale={townBackgroundImageScale}
+                  setBackgroundImageScale={setTownBackgroundImageScale}
+                  backgroundImageOffsetX={townBackgroundImageOffsetX}
+                  setBackgroundImageOffsetX={setTownBackgroundImageOffsetX}
+                  backgroundImageOffsetY={townBackgroundImageOffsetY}
+                  setBackgroundImageOffsetY={setTownBackgroundImageOffsetY}
+                />
                 <div className="tool-section">
                   <p>Zoom: {townViewDisplay.zoom.toFixed(2)}x</p>
                   <p>Rendered Cells: {townViewDisplay.visibleCells}</p>
@@ -809,6 +1463,19 @@ function App() {
             materials={availableTownMaterials}
             onViewChange={(view: { x: number; y: number; zoom: number }) => setTownViewDisplay(prev => ({ ...prev, zoom: view.zoom }))}
             onVisibleCellsChange={(count: number) => setTownViewDisplay(prev => ({ ...prev, visibleCells: count }))}
+            stickers={townStickers}
+            onStickerAdd={handleStickerAdd}
+            onStickerUpdate={handleStickerUpdate}
+            onStickerDelete={handleStickerDelete}
+            selectedSticker={selectedTownSticker}
+            onSelectSticker={setSelectedTownSticker}
+            backgroundImageUrl={townBackgroundImageUrl || undefined}
+            backgroundImageScale={townBackgroundImageScale}
+            backgroundImageOffsetX={townBackgroundImageOffsetX}
+            backgroundImageOffsetY={townBackgroundImageOffsetY}
+            backgroundImageVisible={townBackgroundImageVisible}
+            onBackgroundImageUpdate={handleBackgroundImageUpdate}
+            showStickers={townStickersVisible}
           />
         </div>
 
@@ -851,6 +1518,7 @@ function App() {
               towns={townListForTools}
               onJumpToTown={handleJumpToTown}
               onEnterTown={handleEnterTown}
+              onRenameTown={handleRenameTown}
               viewSettings={viewSettings}
               onViewSettingChange={handleViewSettingChange}
               brushSize={brushSize}
@@ -889,6 +1557,12 @@ function App() {
               // Hex orientation controls (NEW - additive only)
               hexOrientation={hexOrientation}
               setHexOrientation={setHexOrientation}
+              // Map data management
+              onLoadMap={handleLoadMap}
+              onSaveMap={handleSaveMap}
+              currentMapKey={currentMapKey}
+              onNewMap={handleNewMap}
+              hasUnsavedChanges={hasUnsavedChanges}
             />
           </div>
         )}

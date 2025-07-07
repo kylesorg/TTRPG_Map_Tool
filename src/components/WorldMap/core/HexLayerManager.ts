@@ -34,6 +34,10 @@ export class HexLayerManager {
     private offscreenDrawingContainer: PIXI.Container | null = null;
     private drawingRenderTexture: PIXI.RenderTexture | null = null;
 
+    // Town name rendering optimization
+    private lastTownNamesHash: string = '';
+    private lastTextScale: number = -1;
+
     constructor(config: LayerManagerConfig, containers: LayerContainers, app: PIXI.Application) {
         this.config = config;
         this.containers = containers;
@@ -165,12 +169,7 @@ export class HexLayerManager {
      * Renders drawing paths (geography features like roads and rivers)
      */
     renderDrawingPaths(drawingPaths: DrawingPath[], visible: boolean = true): void {
-        console.log('[HexLayerManager] renderDrawingPaths called:', {
-            pathCount: drawingPaths.length,
-            geographyVisible: visible,
-            hasContainer: !!this.containers.geography,
-            hasTexture: !!this.drawingRenderTexture
-        });
+        // Render drawing paths
 
         // Set geography layer visibility
         this.containers.geography.visible = visible;
@@ -180,14 +179,7 @@ export class HexLayerManager {
             return;
         }
 
-        console.log('[HexLayerManager] Geography layer visibility check passed, container info:', {
-            visible: this.containers.geography.visible,
-            alpha: this.containers.geography.alpha,
-            zIndex: this.containers.geography.zIndex,
-            children: this.containers.geography.children.length,
-            parent: !!this.containers.geography.parent,
-            parentVisible: this.containers.geography.parent?.visible
-        });
+        // Geography layer visibility check passed
 
         // Clear existing drawings
         this.containers.geography.removeChildren();
@@ -206,7 +198,7 @@ export class HexLayerManager {
             const pathColor = path.color || '#000000'; // Default to black
             const strokeWidth = Math.max(path.strokeWidth || 2, 2); // Minimum 2px width
 
-            console.log(`[HexLayerManager] Using color: ${pathColor}, strokeWidth: ${strokeWidth}`);
+            // Using drawing color and stroke width
 
             // Handle erasing
             if (pathColor === '#FFFFFF') {
@@ -254,7 +246,7 @@ export class HexLayerManager {
      * Renders a live drawing preview path
      */
     renderDrawingPreview(previewData: { points: { x: number; y: number }[], color: string, strokeWidth: number } | null): void {
-        console.log('[HexLayerManager] renderDrawingPreview called:', previewData ? { pointCount: previewData.points.length, color: previewData.color, strokeWidth: previewData.strokeWidth } : 'null (clearing)');
+        // Render drawing preview
 
         // Clear existing preview
         this.containers.liveDrawing.removeChildren();
@@ -310,11 +302,58 @@ export class HexLayerManager {
     }
 
     /**
-     * Renders town names (placeholder for now)
+     * Renders town names on the map
      */
-    renderTownNames(_hexTiles: any[]): void {
-        // Placeholder implementation
-        console.log('[HexLayerManager] renderTownNames called (placeholder)');
+    renderTownNames(hexTiles: any[]): void {
+        // Filter for towns and render their names
+        const towns = hexTiles.filter(hex => hex.isTown && hex.townName);
+
+        // Create a hash of the current town data to check if re-render is needed
+        const currentHash = towns.map(town => `${town.id}:${town.townName}:${town.coordinates.q}:${town.coordinates.r}`).join('|');
+        const scaleChanged = this.lastTextScale !== this.config.textScale;
+
+        // Only re-render if towns changed or text scale changed
+        if (currentHash === this.lastTownNamesHash && !scaleChanged) {
+            return; // No changes, skip re-render
+        }
+
+        this.lastTownNamesHash = currentHash;
+        this.lastTextScale = this.config.textScale;
+
+        // Clear existing text
+        this.containers.townNames.removeChildren();
+
+        towns.forEach(town => {
+            const townName = town.townName || 'Unnamed Town';
+            // Use the new PIXI v8 syntax to avoid deprecation warning
+            const text = new PIXI.Text({
+                text: townName,
+                style: {
+                    fontFamily: 'Arial',
+                    fontSize: 60 * this.config.textScale, // 5x bigger default size (was 12, now 60)
+                    fill: 0xffffff,
+                    stroke: { color: 0x000000, width: 8 }, // Even thicker stroke for better visibility (was 6, now 8)
+                    align: 'center'
+                }
+            });
+
+            // Position the text above the hex
+            const hexCenter = this.getHexCenterPosition(town.coordinates.q, town.coordinates.r);
+            text.x = hexCenter.x;
+            text.y = hexCenter.y - (this.config.tileSize * 3.5); // Move much higher above the hex (3.5 * 12 = 42 pixels above center)
+            text.anchor.set(0.5, 0.5); // Center the text
+
+            this.containers.townNames.addChild(text);
+        });
+
+        console.log(`[HexLayerManager] Rendered ${towns.length} town names (scale: ${this.config.textScale})`);
+    }
+
+    /**
+     * Gets the center position of a hex in pixel coordinates
+     */
+    private getHexCenterPosition(q: number, r: number): { x: number; y: number } {
+        return axialToPixelOriented(q, r, this.config.tileSize, this.config.hexOrientation || 'flat-top');
     }
 
     /**
@@ -394,8 +433,12 @@ export class HexLayerManager {
         // Handled by texture generation now
     }
 
-    setTextScale(_scale: number): void {
-        // Placeholder implementation
+    setTextScale(scale: number): void {
+        // Update the text scale in the configuration
+        this.config.textScale = scale;
+        // Force re-render by resetting the scale tracking
+        this.lastTextScale = -1;
+        console.log(`[HexLayerManager] Text scale updated to: ${scale}`);
     }
 
     setHexOrientation(_orientation: HexOrientation): void {

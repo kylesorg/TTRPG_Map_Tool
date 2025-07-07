@@ -83,18 +83,22 @@ export class TownLayerManager {
     /**
      * Sets up background image layer
      */
-    setBackgroundImage(imageUrl: string, scale: number = 1, offsetX: number = 0, offsetY: number = 0): void {
+    async setBackgroundImage(imageUrl: string, scale: number = 1, offsetX: number = 0, offsetY: number = 0): Promise<void> {
         this.containers.backgroundImage.removeChildren();
 
         if (!imageUrl) return;
 
-        const texture = PIXI.Texture.from(imageUrl);
-        this.backgroundSprite = new PIXI.Sprite(texture);
-        this.backgroundSprite.scale.set(scale);
-        this.backgroundSprite.position.set(offsetX, offsetY);
+        try {
+            const texture = await PIXI.Assets.load(imageUrl);
+            this.backgroundSprite = new PIXI.Sprite(texture);
+            this.backgroundSprite.scale.set(scale);
+            this.backgroundSprite.position.set(offsetX, offsetY);
 
-        this.containers.backgroundImage.addChild(this.backgroundSprite);
-        console.log('[TownLayerManager] Background image set:', { imageUrl, scale, offsetX, offsetY });
+            this.containers.backgroundImage.addChild(this.backgroundSprite);
+            console.log('[TownLayerManager] Background image set:', { imageUrl, scale, offsetX, offsetY });
+        } catch (error) {
+            console.error('[TownLayerManager] Failed to load background image:', error);
+        }
     }
 
     /**
@@ -123,6 +127,16 @@ export class TownLayerManager {
                 // Find material for this cell
                 const material = materials.find(m => m.style === cellData?.material) ||
                     materials.find(m => m.style === 'default');
+
+                // Skip rendering if material is fully transparent
+                if (material && material.color) {
+                    const color = new PIXI.Color(material.color);
+                    if (color.alpha === 0) {
+                        // Don't render fully transparent cells - let background show through
+                        continue;
+                    }
+                }
+
                 const tint = material ? new PIXI.Color(material.color).toNumber() : 0xFFFFFF;
 
                 // Create sprite
@@ -191,25 +205,34 @@ export class TownLayerManager {
     /**
      * Renders stickers layer
      */
-    renderStickers(stickers: TownSticker[], visible: boolean = true): void {
+    async renderStickers(stickers: TownSticker[], visible: boolean = true): Promise<void> {
         this.containers.stickers.removeChildren();
         this.containers.stickers.visible = visible;
 
         if (!visible || stickers.length === 0) return;
 
-        stickers.forEach((sticker, index) => {
-            console.log(`[TownLayerManager] Rendering sticker ${index}:`, sticker);
+        // Load all stickers asynchronously
+        const stickerPromises = stickers.map(async (sticker, index) => {
+            try {
+                console.log(`[TownLayerManager] Loading sticker ${index}:`, sticker);
 
-            const texture = PIXI.Texture.from(sticker.imageUrl);
-            const sprite = new PIXI.Sprite(texture);
+                const texture = await PIXI.Assets.load(sticker.imageUrl);
+                const sprite = new PIXI.Sprite(texture);
 
-            sprite.position.set(sticker.position.x, sticker.position.y);
-            sprite.scale.set(sticker.scale);
-            sprite.rotation = sticker.rotation;
-            sprite.zIndex = sticker.zIndex || 0;
+                sprite.position.set(sticker.position.x, sticker.position.y);
+                sprite.scale.set(sticker.scale);
+                sprite.rotation = sticker.rotation;
+                sprite.zIndex = sticker.zIndex || 0;
 
-            this.containers.stickers.addChild(sprite);
+                this.containers.stickers.addChild(sprite);
+                return sprite;
+            } catch (error) {
+                console.error(`[TownLayerManager] Failed to load sticker ${index}:`, error);
+                return null;
+            }
         });
+
+        await Promise.all(stickerPromises);
 
         // Sort stickers by zIndex
         this.containers.stickers.sortChildren();
@@ -225,13 +248,20 @@ export class TownLayerManager {
         if (!highlightData) return;
 
         const highlight = new PIXI.Graphics();
+
+        // Draw just the border/stroke instead of filling the entire square
         highlight.rect(
             highlightData.cellX * this.config.cellSize,
             highlightData.cellY * this.config.cellSize,
             this.config.cellSize,
             this.config.cellSize
         );
-        highlight.fill({ color: highlightData.color, alpha: highlightData.alpha });
+        highlight.stroke({
+            width: 2,
+            color: highlightData.color,
+            alpha: highlightData.alpha,
+            alignment: 0.5 // Center the stroke on the rectangle edge
+        });
 
         this.containers.highlight.addChild(highlight);
     }

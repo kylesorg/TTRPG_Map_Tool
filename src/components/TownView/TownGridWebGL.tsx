@@ -89,7 +89,7 @@ const TownGridWebGL: React.FC<TownGridWebGLProps> = ({
     const [cursor, setCursor] = useState('default');
 
     useEffect(() => {
-        setCursor(tool === 'paint' ? 'crosshair' : (isPointerDown.current ? 'grabbing' : 'grab'));
+        setCursor(tool === 'paint' ? 'town-paint-cursor' : (isPointerDown.current ? 'grabbing' : 'grab'));
     }, [tool]); // Removed isPointerDown.current as it's a ref and doesn't trigger re-renders
 
 
@@ -356,7 +356,7 @@ const TownGridWebGL: React.FC<TownGridWebGLProps> = ({
             isPointerDown.current = true;
             didDrag.current = false;
             panStartPoint.current = { x: e.clientX, y: e.clientY };
-            setCursor(tool === 'paint' ? 'crosshair' : 'grabbing');
+            setCursor(tool === 'paint' ? 'town-paint-cursor' : 'grabbing');
 
             if (tool === 'paint') {
                 isPainting.current = true;
@@ -388,7 +388,7 @@ const TownGridWebGL: React.FC<TownGridWebGLProps> = ({
                     };
                 });
                 panStartPoint.current = { x: e.clientX, y: e.clientY };
-            } else if (isPainting.current) {
+            } else if (tool === 'paint' && isPainting.current) {
                 const currentCell = getCellFromPointer(new PIXI.Point(e.clientX, e.clientY));
                 if (currentCell) {
                     const lastCell = lastPaintedCell.current;
@@ -434,7 +434,7 @@ const TownGridWebGL: React.FC<TownGridWebGLProps> = ({
 
             isPointerDown.current = false;
             didDrag.current = false;
-            setCursor(tool === 'paint' ? 'crosshair' : 'grab');
+            setCursor(tool === 'paint' ? 'town-paint-cursor' : 'grab');
         };
 
         containerNode.addEventListener('pointerdown', onPointerDown);
@@ -489,7 +489,7 @@ const TownGridWebGL: React.FC<TownGridWebGLProps> = ({
         }
     }, [view, selectedCell, pixiAppLoaded, redrawView]);
 
-    return <div ref={setContainerNodeRef} style={{ width: '100%', height: '100%', cursor: cursor }} />;
+    return <div ref={setContainerNodeRef} style={{ width: '100%', height: '100%' }} className={cursor} />;
 };
 
 export default TownGridWebGL;

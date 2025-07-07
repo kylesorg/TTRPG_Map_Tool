@@ -100,7 +100,7 @@ export class HexEventHandler {
 
         // If we start panning while drawing geography, stop drawing
         if (isPanning && this.state.isDrawing) {
-            console.log('[HexEventHandler] Geography drawing interrupted by panning');
+            // Geography drawing interrupted by panning
             this.state.isDrawing = false;
             this.state.currentDrawingPath = null;
         }
@@ -125,7 +125,7 @@ export class HexEventHandler {
 
         this.fillsContainer.on('pointerdown', (event: PIXI.FederatedPointerEvent) => {
             const { x, y } = event.data.global;
-            console.log('[HexEventHandler] Pointer down:', { x, y, tool: this.state.currentTool, button: event.data.button });
+            // Pointer down event
 
             // Only handle left-click (button 0) for tool interactions
             if (event.data.button === 0) {
@@ -170,7 +170,7 @@ export class HexEventHandler {
                 this.handleGeographyToolPointerDown(event);
                 break;
             default:
-                console.log('[HexEventHandler] Unknown tool:', this.state.currentTool);
+            // Unknown tool
         }
     }
 
@@ -230,15 +230,11 @@ export class HexEventHandler {
      * Handles paint tool pointer down - starts painting
      */
     private handlePaintToolPointerDown(event: PIXI.FederatedPointerEvent): void {
-        console.log('[HexEventHandler] Paint tool activated - current state:', {
-            currentTool: this.state.currentTool,
-            isPanning: this.state.isPanning,
-            didPan: this.state.didPan
-        });
+        // Paint tool activated
 
         // Don't paint if we're panning or if we panned
         if (this.state.isPanning || this.state.didPan) {
-            console.log('[HexEventHandler] Paint blocked by panning state');
+            // Paint blocked by panning state
             return;
         }
 
@@ -246,12 +242,12 @@ export class HexEventHandler {
         const hex = this.getHexAtScreenPoint(x, y);
 
         if (hex) {
-            console.log('[HexEventHandler] Starting paint on hex:', hex.id, '- calling onPaintHexBatch at', Date.now());
+            // Starting paint on hex
             this.state.isPainting = true;
             this.state.lastPaintedHex = hex;
             this.config.onPaintHexBatch([{ hexId: hex.id }], this.state.currentTool);
         } else {
-            console.log('[HexEventHandler] No hex found at click location');
+            // No hex found at click location
         }
     }
 

@@ -1,0 +1,32 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simple town icon with buildings -->
+  <g fill="#8B4513" stroke="#654321" stroke-width="1">
+    <!-- Building 1 -->
+    <rect x="2" y="18" width="8" height="12" />
+    <polygon points="2,18 6,12 10,18" fill="#D2691E" />
+    
+    <!-- Building 2 -->
+    <rect x="12" y="15" width="8" height="15" />
+    <polygon points="12,15 16,9 20,15" fill="#D2691E" />
+    
+    <!-- Building 3 -->
+    <rect x="22" y="20" width="8" height="10" />
+    <polygon points="22,20 26,14 30,20" fill="#D2691E" />
+  </g>
+  
+  <!-- Windows -->
+  <g fill="#FFD700">
+    <rect x="4" y="22" width="2" height="2" />
+    <rect x="7" y="22" width="2" height="2" />
+    <rect x="4" y="26" width="2" height="2" />
+    <rect x="7" y="26" width="2" height="2" />
+    
+    <rect x="14" y="19" width="2" height="2" />
+    <rect x="17" y="19" width="2" height="2" />
+    <rect x="14" y="23" width="2" height="2" />
+    <rect x="17" y="23" width="2" height="2" />
+    
+    <rect x="24" y="24" width="2" height="2" />
+    <rect x="27" y="24" width="2" height="2" />
+  </g>
+</svg>

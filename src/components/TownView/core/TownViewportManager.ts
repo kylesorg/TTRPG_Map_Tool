@@ -71,9 +71,9 @@ export class TownViewportManager {
     }
 
     /**
-     * Updates the current tool (affects panning behavior)
+     * Sets the current tool (affects panning behavior)
      */
-    setCurrentTool(tool: TownToolMode): void {
+    setTool(tool: TownToolMode): void {
         this.currentTool = tool;
     }
 

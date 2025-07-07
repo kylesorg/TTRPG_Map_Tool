@@ -32,7 +32,11 @@ const HexDetailPanel: React.FC<HexDetailPanelProps> = ({
             setEncounterNotes(selectedHex.encounters && selectedHex.encounters.length > 0 ? selectedHex.encounters.join('\\n') : (selectedHex as any).encounterNotes || '');
             // Set initial town name for designation input if hex is not a town
             if (!selectedHex.isTown) {
-                setTownNameInput(`Town at ${selectedHex.labelX},${selectedHex.labelY}`);
+                // Use coordinates from hex ID if labelX/labelY are undefined
+                const coordsFromId = selectedHex.id.split(',');
+                const fallbackX = selectedHex.labelX ?? (coordsFromId[0] ? parseInt(coordsFromId[0]) : 0);
+                const fallbackY = selectedHex.labelY ?? (coordsFromId[1] ? parseInt(coordsFromId[1]) : 0);
+                setTownNameInput(`Town at ${fallbackX},${fallbackY}`);
             } else {
                 setTownNameInput(''); // Clear if it is a town
             }

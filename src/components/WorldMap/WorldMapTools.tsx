@@ -3,6 +3,7 @@ import { SketchPicker } from 'react-color';
 import type { ColorResult } from 'react-color';
 import type { ToolMode, Biome, HexTile } from '../../types/mapTypes'; // Added HexTile
 import type { HexOrientation } from '../../utils/hexMath'; // NEW: Hex orientation types
+import { isDefaultKey } from '../../utils/mapKeyGenerator';
 import BiomeSelector from '../Tools/BiomeSelector';
 import TownList from './TownList'; // Import the new TownList component
 import GeographyToolPanel from '../Tools/GeographyToolPanel';
@@ -25,6 +26,7 @@ interface WorldMapToolsProps {
     towns: HexTile[]; // Add towns to props
     onJumpToTown: (hexId: string) => void; // Add jump handler to props
     onEnterTown: (townId: string) => void;
+    onRenameTown: (townId: string, newName: string) => void;
     // Props for the new View tab
     viewSettings: {
         showTownNames: boolean;
@@ -67,6 +69,12 @@ interface WorldMapToolsProps {
     // Hex orientation controls (NEW - additive only)
     hexOrientation: HexOrientation;
     setHexOrientation: (orientation: HexOrientation) => void;
+    // Map data management
+    onLoadMap?: (mapKey: string) => Promise<boolean>;
+    onSaveMap?: () => Promise<boolean>;
+    currentMapKey?: string;
+    onNewMap?: () => Promise<void>;
+    hasUnsavedChanges?: boolean;
 }
 
 const WorldMapTools: React.FC<WorldMapToolsProps> = ({
@@ -86,6 +94,7 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
     towns,
     onJumpToTown,
     onEnterTown,
+    onRenameTown,
     viewSettings,
     onViewSettingChange,
     brushSize,
@@ -124,31 +133,54 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
     // Hex orientation props (NEW - additive only)
     hexOrientation,
     setHexOrientation,
+    // Map data management
+    onLoadMap,
+    onSaveMap,
+    currentMapKey,
+    onNewMap,
+    hasUnsavedChanges,
 }) => {
-    const [activeTab, setActiveTab] = useState<'edit' | 'view'>('edit');
+    const [activeTab, setActiveTab] = useState<'edit' | 'view' | 'importExport'>('edit');
     const [showGridLineColorPicker, setShowGridLineColorPicker] = useState(false);
     const [editingGridLineColor, setEditingGridLineColor] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [copied, setCopied] = useState(false);
 
     // Temporary input states for better UX
     const [scaleInputValue, setScaleInputValue] = useState<string>('');
     const [offsetXInputValue, setOffsetXInputValue] = useState<string>('');
     const [offsetYInputValue, setOffsetYInputValue] = useState<string>('');
+    const [mapKeyInput, setMapKeyInput] = useState<string>('');
+    const [availableMaps, setAvailableMaps] = useState<any[]>([]);
+    const [isLoadingMaps, setIsLoadingMaps] = useState(false);
 
     const handleRemoveBackgroundImage = async () => {
         try {
-            // Extract mapId from the current URL if it exists
+            // Extract mapKey from the current URL if it exists
             if (backgroundImageUrl) {
                 const urlParts = backgroundImageUrl.split('/');
-                const filename = urlParts[urlParts.length - 1];
-                const mapId = filename.replace('_background.jpeg', '').replace('_background.jpg', '').replace('_background.png', '');
+                let mapKey = '';
+
+                // Handle new structure: /map_data/map_{mapKey}/{filename}
+                if (urlParts.includes('map_data')) {
+                    const mapDirIndex = urlParts.findIndex(part => part.startsWith('map_'));
+                    if (mapDirIndex >= 0) {
+                        mapKey = urlParts[mapDirIndex].replace('map_', '');
+                    }
+                } else {
+                    // Handle old structure: /uploads/backgrounds/map_{mapKey}_background.ext
+                    const filename = urlParts[urlParts.length - 1];
+                    mapKey = filename.replace('_background.jpeg', '').replace('_background.jpg', '').replace('_background.png', '').replace('map_', '');
+                }
 
                 // Try to delete from server (optional - if it fails, we still clear the UI)
-                try {
-                    await BackgroundImageAPI.deleteBackgroundImage(mapId);
-                    console.log('✅ Background image deleted from server');
-                } catch (deleteError) {
-                    console.warn('⚠️ Failed to delete from server (file may not exist):', deleteError);
+                if (mapKey) {
+                    try {
+                        await BackgroundImageAPI.deleteBackgroundImage(mapKey);
+                        console.log('✅ Background image deleted from server');
+                    } catch (deleteError) {
+                        console.warn('⚠️ Failed to delete from server (file may not exist):', deleteError);
+                    }
                 }
             }
 
@@ -195,6 +227,103 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
             <div className="tabs">
                 <button className={activeTab === 'edit' ? 'active' : ''} onClick={() => setActiveTab('edit')}>Edit</button>
                 <button className={activeTab === 'view' ? 'active' : ''} onClick={() => setActiveTab('view')}>View</button>
+                <button className={activeTab === 'importExport' ? 'active' : ''} onClick={() => setActiveTab('importExport')}>Import/Export</button>
+            </div>
+
+            {/* Map Key Display */}
+            <div style={{
+                padding: '8px 12px',
+                backgroundColor: '#2a2a2a',
+                borderBottom: '1px solid #444',
+                fontSize: '12px',
+                color: '#ccc',
+                fontFamily: 'monospace',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+            }}>
+                <span>
+                    <strong style={{ color: '#fff' }}>Map:</strong> {currentMapKey || 'default_map'}
+                    {hasUnsavedChanges && !isDefaultKey(currentMapKey || 'default_map') && (
+                        <span style={{
+                            marginLeft: '8px',
+                            padding: '2px 6px',
+                            backgroundColor: '#ffc107',
+                            color: '#000',
+                            fontSize: '9px',
+                            borderRadius: '3px',
+                            fontWeight: 'bold'
+                        }}>
+                            UNSAVED
+                        </span>
+                    )}
+                </span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                        onClick={() => {
+                            navigator.clipboard.writeText(currentMapKey || 'default_map');
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 5000);
+                        }}
+                        style={{
+                            padding: '2px 6px',
+                            fontSize: '10px',
+                            backgroundColor: copied ? '#28a745' : '#444',
+                            color: copied ? '#fff' : '#ccc',
+                            border: '1px solid #666',
+                            borderRadius: '3px',
+                            cursor: 'pointer',
+                            transition: 'background 0.2s, color 0.2s'
+                        }}
+                        title="Copy map key to clipboard"
+                    >
+                        {copied ? '✔ Copied' : 'Copy'}
+                    </button>
+                    {onLoadMap && (
+                        <button
+                            onClick={async () => {
+                                const inputKey = prompt('Enter map key to load:');
+                                if (inputKey === null) {
+                                    return; // User cancelled
+                                }
+
+                                const trimmedKey = inputKey.trim();
+                                if (!trimmedKey) {
+                                    alert('Please enter a valid map key');
+                                    return;
+                                }
+
+                                try {
+                                    setIsLoadingMaps(true);
+                                    const success = await onLoadMap(trimmedKey);
+                                    if (success) {
+                                        alert(`Map "${trimmedKey}" loaded successfully!`);
+                                    } else {
+                                        alert('Map not found or invalid map key. Please check the key and try again.');
+                                    }
+                                } catch (error) {
+                                    console.error('Failed to load map:', error);
+                                    alert('Failed to load map. Please check the key and try again.');
+                                } finally {
+                                    setIsLoadingMaps(false);
+                                }
+                            }}
+                            disabled={isLoadingMaps}
+                            style={{
+                                padding: '2px 6px',
+                                fontSize: '10px',
+                                backgroundColor: '#0066cc',
+                                color: '#fff',
+                                border: '1px solid #0066cc',
+                                borderRadius: '3px',
+                                cursor: isLoadingMaps ? 'not-allowed' : 'pointer'
+                            }}
+                            title="Load map by key"
+                        >
+                            {isLoadingMaps ? '...' : 'Load'}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {activeTab === 'edit' && (
@@ -242,7 +371,7 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
                         <p>Rendered Hexes: {renderedHexesCount}</p>
                     </div>
 
-                    <TownList towns={towns} onJumpToTown={onJumpToTown} onEnterTown={onEnterTown} />
+                    <TownList towns={towns} onJumpToTown={onJumpToTown} onEnterTown={onEnterTown} onRenameTown={onRenameTown} />
                 </>
             )}
 
@@ -404,11 +533,11 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
                                 const file = e.target.files?.[0];
                                 if (file) {
                                     try {
-                                        // Generate map ID
-                                        const mapId = BackgroundImageAPI.generateMapId();
+                                        // Use current map key for upload
+                                        const mapKey = currentMapKey || 'default_map';
 
                                         // Upload to server
-                                        const result = await BackgroundImageAPI.uploadBackgroundImage(file, mapId);
+                                        const result = await BackgroundImageAPI.uploadBackgroundImage(file, mapKey, 'worldmap');
                                         setBackgroundImageUrl(result.url);
                                         console.log('✅ Background image uploaded successfully:', result);
                                     } catch (error) {
@@ -691,6 +820,243 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
                             </button>
                         </>
                     )}
+                </div>
+            )}
+
+            {activeTab === 'importExport' && (
+                <div>
+                    <div className="tool-section">
+                        <h4 style={{ color: 'white' }}>Load Map by Key</h4>
+                        <div style={{ marginBottom: '10px' }}>
+                            <input
+                                type="text"
+                                placeholder="Enter map key..."
+                                value={mapKeyInput}
+                                onChange={(e) => setMapKeyInput(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '8px',
+                                    marginBottom: '8px',
+                                    backgroundColor: '#444',
+                                    color: 'white',
+                                    border: '1px solid #666',
+                                    borderRadius: '4px'
+                                }}
+                            />
+                            <button
+                                onClick={async () => {
+                                    if (!mapKeyInput.trim()) {
+                                        alert('Please enter a map key');
+                                        return;
+                                    }
+
+                                    try {
+                                        setIsLoadingMaps(true);
+
+                                        if (onLoadMap) {
+                                            const success = await onLoadMap(mapKeyInput.trim());
+                                            if (success) {
+                                                alert('Map loaded successfully!');
+                                                setMapKeyInput(''); // Clear input after successful load
+                                            } else {
+                                                alert('Failed to load map. Please check the map key and try again.');
+                                            }
+                                        } else {
+                                            // Fallback to direct API call if onLoadMap not provided
+                                            const result = await BackgroundImageAPI.loadMapData(mapKeyInput.trim());
+
+                                            if (result.success) {
+                                                console.log('Map loaded:', result.mapData);
+                                                alert(`Map "${result.mapData.worldMap?.name || 'Unnamed'}" loaded successfully!`);
+                                            } else {
+                                                alert('Map not found or invalid map key');
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('Failed to load map:', error);
+                                        alert('Failed to load map. Please check the map key and try again.');
+                                    } finally {
+                                        setIsLoadingMaps(false);
+                                    }
+                                }}
+                                disabled={isLoadingMaps}
+                                style={{
+                                    width: '100%',
+                                    padding: '8px',
+                                    backgroundColor: '#0066cc',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: isLoadingMaps ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                {isLoadingMaps ? 'Loading...' : 'Load Map'}
+                            </button>
+                        </div>
+
+                        <hr />
+
+                        <h4 style={{ color: 'white' }}>Available Maps</h4>
+                        <div style={{ marginBottom: '10px' }}>
+                            <button
+                                onClick={async () => {
+                                    try {
+                                        setIsLoadingMaps(true);
+                                        const result = await BackgroundImageAPI.listMaps();
+
+                                        if (result.success) {
+                                            setAvailableMaps(result.maps);
+                                        } else {
+                                            alert('Failed to load map list');
+                                        }
+                                    } catch (error) {
+                                        console.error('Failed to list maps:', error);
+                                        alert('Failed to load map list');
+                                    } finally {
+                                        setIsLoadingMaps(false);
+                                    }
+                                }}
+                                disabled={isLoadingMaps}
+                                style={{
+                                    width: '100%',
+                                    padding: '8px',
+                                    backgroundColor: '#666',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: isLoadingMaps ? 'not-allowed' : 'pointer',
+                                    marginBottom: '8px'
+                                }}
+                            >
+                                {isLoadingMaps ? 'Loading...' : 'Refresh Map List'}
+                            </button>
+
+                            {availableMaps.length > 0 && (
+                                <div style={{
+                                    maxHeight: '200px',
+                                    overflowY: 'auto',
+                                    border: '1px solid #666',
+                                    borderRadius: '4px',
+                                    backgroundColor: '#333'
+                                }}>
+                                    {availableMaps.map((map) => (
+                                        <div
+                                            key={map.mapKey}
+                                            style={{
+                                                padding: '8px',
+                                                borderBottom: '1px solid #555',
+                                                cursor: 'pointer',
+                                                color: 'white'
+                                            }}
+                                            onClick={() => setMapKeyInput(map.mapKey)}
+                                        >
+                                            <div style={{ fontWeight: 'bold' }}>
+                                                {map.name || 'Unnamed Map'}
+                                            </div>
+                                            <div style={{ fontSize: '12px', color: '#ccc' }}>
+                                                Key: {map.mapKey}
+                                            </div>
+                                            {map.lastModified && (
+                                                <div style={{ fontSize: '11px', color: '#999' }}>
+                                                    Modified: {new Date(map.lastModified).toLocaleDateString()}
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {availableMaps.length === 0 && (
+                                <div style={{
+                                    padding: '16px',
+                                    textAlign: 'center',
+                                    color: '#999',
+                                    fontStyle: 'italic'
+                                }}>
+                                    No saved maps found. Click "Refresh Map List" to check for available maps.
+                                </div>
+                            )}
+                        </div>
+
+                        <hr />
+
+                        <h4 style={{ color: 'white' }}>Save Current Map</h4>
+                        <div style={{ marginBottom: '10px' }}>
+                            <button
+                                onClick={async () => {
+                                    if (onSaveMap) {
+                                        try {
+                                            setIsLoadingMaps(true);
+                                            const success = await onSaveMap();
+                                            if (success) {
+                                                alert('Map saved successfully!');
+                                            } else {
+                                                alert('Failed to save map. Please try again.');
+                                            }
+                                        } catch (error) {
+                                            console.error('Failed to save map:', error);
+                                            alert('Failed to save map. Please try again.');
+                                        } finally {
+                                            setIsLoadingMaps(false);
+                                        }
+                                    } else {
+                                        alert('Save functionality not available');
+                                    }
+                                }}
+                                disabled={isLoadingMaps}
+                                style={{
+                                    width: '100%',
+                                    padding: '8px',
+                                    backgroundColor: '#0066cc',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: isLoadingMaps ? 'not-allowed' : 'pointer'
+                                }}
+                            >
+                                {isLoadingMaps ? 'Saving...' : `Save Current Map (${currentMapKey || 'default'})`}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* New Map Button - Always visible at bottom */}
+            {onNewMap && (
+                <div style={{
+                    padding: '12px',
+                    borderTop: '1px solid #444',
+                    backgroundColor: '#1a1a1a'
+                }}>
+                    <button
+                        onClick={async () => {
+                            try {
+                                setIsLoadingMaps(true);
+                                await onNewMap();
+                                alert('New map created successfully!');
+                            } catch (error) {
+                                console.error('Failed to create new map:', error);
+                                alert('Failed to create new map. Please try again.');
+                            } finally {
+                                setIsLoadingMaps(false);
+                            }
+                        }}
+                        disabled={isLoadingMaps}
+                        style={{
+                            width: '100%',
+                            padding: '10px',
+                            backgroundColor: '#dc3545',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: isLoadingMaps ? 'not-allowed' : 'pointer',
+                            fontSize: '14px',
+                            fontWeight: 'bold'
+                        }}
+                        title="Create a new blank map (will prompt to save current map if needed)"
+                    >
+                        {isLoadingMaps ? 'Creating...' : '🗺️ New Map'}
+                    </button>
                 </div>
             )}
         </div>

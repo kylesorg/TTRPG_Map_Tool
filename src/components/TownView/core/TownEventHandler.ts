@@ -2,13 +2,15 @@ import * as PIXI from 'pixi.js';
 import type { TownData } from '../../../types/townTypes';
 import type { TownMaterial } from '../../../types/mapTypes';
 
-export type TownToolMode = 'select' | 'paint';
+export type TownToolMode = 'select' | 'paint' | 'sticker';
 
 export interface TownEventHandlerConfig {
     cellSize: number;
     onCellClick: (cell: { x: number; y: number }) => void;
     onPaintCellBatch: (batch: Array<{ x: number; y: number; material: string }>) => void;
+    onPaintCellLive?: (cell: { x: number; y: number; material: string }) => void;
     onPaintComplete?: (lastPaintedCell: { x: number; y: number }) => void;
+    onStickerPlace?: (position: { x: number; y: number }) => void;
 }
 
 export interface TownEventHandlerState {
@@ -75,6 +77,21 @@ export class TownEventHandler {
     }
 
     /**
+     * Converts screen coordinates to world coordinates (for sticker placement)
+     */
+    private screenToWorld(screenX: number, screenY: number, canvas: HTMLCanvasElement): { x: number; y: number } | null {
+        // Convert screen coordinates to canvas coordinates
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = screenX - rect.left;
+        const canvasY = screenY - rect.top;
+
+        // Convert canvas coordinates to local container coordinates
+        const localPos = this.cellContainer.toLocal(new PIXI.Point(canvasX, canvasY));
+
+        return { x: localPos.x, y: localPos.y };
+    }
+
+    /**
      * Converts screen coordinates to cell coordinates
      */
     private screenToCell(screenX: number, screenY: number, canvas: HTMLCanvasElement): { x: number; y: number } | null {
@@ -87,7 +104,7 @@ export class TownEventHandler {
 
         // Convert canvas coordinates to local container coordinates
         const localPos = this.cellContainer.toLocal(new PIXI.Point(canvasX, canvasY));
-        
+
         // Calculate cell coordinates
         const cellX = Math.floor(localPos.x / this.config.cellSize);
         const cellY = Math.floor(localPos.y / this.config.cellSize);
@@ -108,11 +125,16 @@ export class TownEventHandler {
         // Only handle events that occurred on the canvas
         if (e.target !== canvas) return;
 
-        const cell = this.screenToCell(e.clientX, e.clientY, canvas);
-        if (!cell) return;
-
         if (this.state.currentTool === 'paint' && this.state.selectedMaterial) {
-            this.startPainting(cell);
+            const cell = this.screenToCell(e.clientX, e.clientY, canvas);
+            if (cell) {
+                this.startPainting(cell);
+            }
+        } else if (this.state.currentTool === 'sticker') {
+            const worldPos = this.screenToWorld(e.clientX, e.clientY, canvas);
+            if (worldPos && this.config.onStickerPlace) {
+                this.config.onStickerPlace(worldPos);
+            }
         }
     }
 
@@ -186,7 +208,7 @@ export class TownEventHandler {
         if (this.state.paintBatch.size > 0) {
             const batch = Array.from(this.state.paintBatch.values());
             this.config.onPaintCellBatch(batch);
-            
+
             // Call completion callback if available
             if (this.config.onPaintComplete && this.state.lastPaintedCell) {
                 this.config.onPaintComplete(this.state.lastPaintedCell);
@@ -215,19 +237,26 @@ export class TownEventHandler {
             return;
         }
 
-        // Add to batch
-        this.state.paintBatch.set(cellKey, {
+        const paintData = {
             x: cell.x,
             y: cell.y,
             material: this.state.selectedMaterial.style
-        });
+        };
+
+        // Add to batch
+        this.state.paintBatch.set(cellKey, paintData);
+
+        // Call live paint callback for immediate visual feedback
+        if (this.config.onPaintCellLive) {
+            this.config.onPaintCellLive(paintData);
+        }
     }
 
     /**
      * Gets line points between two cells using Bresenham's algorithm
      */
     private getLineBetweenCells(
-        start: { x: number; y: number }, 
+        start: { x: number; y: number },
         end: { x: number; y: number }
     ): { x: number; y: number }[] {
         const points: { x: number; y: number }[] = [];
@@ -273,6 +302,13 @@ export class TownEventHandler {
         if (this.state.isPainting) {
             this.endPainting();
         }
+    }
+
+    /**
+     * Gets the current tool
+     */
+    getCurrentTool(): TownToolMode {
+        return this.state.currentTool;
     }
 
     /**
