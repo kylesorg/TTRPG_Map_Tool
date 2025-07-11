@@ -433,7 +433,11 @@ function uploadPlugin(): Plugin {
             const mapDataFilename = `${mapKey}_Map_Info.json`
             const mapDataPath = path.join(mapDir, mapDataFilename)
 
-            fs.writeFileSync(mapDataPath, mapData, 'utf8')
+            // Parse the JSON string and format it with proper indentation
+            const parsedMapData = JSON.parse(mapData)
+            const formattedMapData = JSON.stringify(parsedMapData, null, 2)
+
+            fs.writeFileSync(mapDataPath, formattedMapData, 'utf8')
 
             console.log('💾 Map data saved:', mapDataFilename)
             res.statusCode = 200
@@ -580,6 +584,156 @@ function uploadPlugin(): Plugin {
         }
       })
 
+      // Geography image management endpoints
+      server.middlewares.use('/api/upload/geography', async (req, res, next) => {
+        if (req.method === 'POST') {
+          try {
+            const form = new formidable.IncomingForm()
+            const [fields, files] = await form.parse(req)
+
+            const mapKey = Array.isArray(fields.mapKey) ? fields.mapKey[0] : fields.mapKey
+            const imageFile = Array.isArray(files.image) ? files.image[0] : files.image
+
+            if (!mapKey || !imageFile) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: 'Missing mapKey or image file' }))
+              return
+            }
+
+            // Create map directory
+            const mapDir = path.join(baseUploadsDir, `map_${mapKey}`)
+            if (!fs.existsSync(mapDir)) {
+              fs.mkdirSync(mapDir, { recursive: true })
+            }
+
+            // Save geography image
+            const geographyFileName = `${mapKey}_geography.png`
+            const geographyPath = path.join(mapDir, geographyFileName)
+            const geographyData = fs.readFileSync(imageFile.filepath)
+            fs.writeFileSync(geographyPath, geographyData)
+
+            // Also save metadata
+            const metadataFileName = `${mapKey}_geography_metadata.json`
+            const metadataPath = path.join(mapDir, metadataFileName)
+            const metadata = {
+              filename: geographyFileName,
+              created: new Date().toISOString(),
+              size: geographyData.length
+            }
+            fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2))
+
+            const publicUrl = `/map_data/map_${mapKey}/${geographyFileName}`
+
+            console.log(`🗺️ Geography image saved: ${geographyFileName} (${geographyData.length} bytes)`)
+
+            res.statusCode = 200
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({
+              success: true,
+              url: publicUrl,
+              filename: geographyFileName,
+              mapKey,
+              size: geographyData.length
+            }))
+          } catch (error) {
+            console.error('❌ Geography upload error:', error)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: 'Failed to upload geography image' }))
+          }
+        } else {
+          next()
+        }
+      })
+
+      server.middlewares.use('/api/geography', async (req, res, next) => {
+        const url = req.url || ''
+        const urlParts = url.split('/')
+
+        if (req.method === 'GET' && urlParts.length >= 3) {
+          // GET /api/geography/{mapKey} - Get geography image data
+          const mapKey = urlParts[3]
+
+          try {
+            const mapDir = path.join(baseUploadsDir, `map_${mapKey}`)
+            const geographyPath = path.join(mapDir, `${mapKey}_geography.png`)
+            const metadataPath = path.join(mapDir, `${mapKey}_geography_metadata.json`)
+
+            if (fs.existsSync(geographyPath) && fs.existsSync(metadataPath)) {
+              const imageData = fs.readFileSync(geographyPath)
+              const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'))
+
+              // Convert image to base64
+              const base64Data = imageData.toString('base64')
+              const imageDataUrl = `data:image/png;base64,${base64Data}`
+
+              const geographyData = {
+                imageDataUrl,
+                width: 4000, // Standard size we use
+                height: 4000,
+                offsetX: 0,
+                offsetY: 0,
+                scale: 1,
+                filename: metadata.filename,
+                created: metadata.created
+              }
+
+              res.statusCode = 200
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify(geographyData))
+            } else {
+              res.statusCode = 404
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: 'No geography image found for this map' }))
+            }
+          } catch (error) {
+            console.error('❌ Geography load error:', error)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: 'Failed to load geography image' }))
+          }
+        } else if (req.method === 'DELETE' && urlParts.length >= 3) {
+          // DELETE /api/geography/{mapKey} - Delete geography image
+          const mapKey = urlParts[3]
+
+          try {
+            const mapDir = path.join(baseUploadsDir, `map_${mapKey}`)
+            const geographyPath = path.join(mapDir, `${mapKey}_geography.png`)
+            const metadataPath = path.join(mapDir, `${mapKey}_geography_metadata.json`)
+
+            let deleted = false
+            if (fs.existsSync(geographyPath)) {
+              fs.unlinkSync(geographyPath)
+              deleted = true
+            }
+            if (fs.existsSync(metadataPath)) {
+              fs.unlinkSync(metadataPath)
+              deleted = true
+            }
+
+            if (deleted) {
+              console.log(`🗺️ Geography image deleted for map: ${mapKey}`)
+              res.statusCode = 200
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: true, message: 'Geography image deleted' }))
+            } else {
+              res.statusCode = 404
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: 'No geography image found for this map' }))
+            }
+          } catch (error) {
+            console.error('❌ Delete geography error:', error)
+            res.statusCode = 500
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ error: 'Failed to delete geography image' }))
+          }
+        } else {
+          next()
+        }
+      })
+
+      // Health check endpoint
       server.middlewares.use('/api/health', (_req, res) => {
         res.statusCode = 200
         res.setHeader('Content-Type', 'application/json')

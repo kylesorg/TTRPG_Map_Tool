@@ -6,7 +6,7 @@ interface TownListProps {
     towns: HexTile[];
     onJumpToTown: (hexId: string) => void;
     onEnterTown: (townId: string) => void;
-    onRenameTown: (townId: string, newName: string) => void;
+    onRenameTown: (hexId: string, newName: string) => void;
 }
 
 interface ContextMenu {
@@ -125,7 +125,12 @@ const TownList: React.FC<TownListProps> = ({ towns, onJumpToTown, onEnterTown, o
                     style={{ top: contextMenu.y, left: contextMenu.x }}
                 >
                     <div className="context-menu-item" onClick={() => { onJumpToTown(contextMenu.selectedTown!.id); closeContextMenu(); }}>Go To</div>
-                    <div className="context-menu-item" onClick={() => { onEnterTown(contextMenu.selectedTown!.townId!); closeContextMenu(); }}>Enter Town</div>
+                    <div className="context-menu-item" onClick={() => {
+                        if (contextMenu.selectedTown?.townId) {
+                            onEnterTown(contextMenu.selectedTown.townId);
+                        }
+                        closeContextMenu();
+                    }}>Enter Town</div>
                     <div className="context-menu-item" onClick={() => openRenameDialog(contextMenu.selectedTown!)}>Rename</div>
                 </div>
             )}

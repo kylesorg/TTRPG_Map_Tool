@@ -3,6 +3,8 @@ import type { TownCell, TownSticker } from '../../../types/townTypes';
 
 export interface TownLayerManagerConfig {
     cellSize: number;
+    gridWidth: number;  // Width in cells
+    gridHeight: number; // Height in cells
     viewSettings: {
         showGridLines: boolean;
     };
@@ -91,13 +93,94 @@ export class TownLayerManager {
         try {
             const texture = await PIXI.Assets.load(imageUrl);
             this.backgroundSprite = new PIXI.Sprite(texture);
+
+            // Center the sprite anchor point
+            this.backgroundSprite.anchor.set(0.5);
+
+            // Set scale
             this.backgroundSprite.scale.set(scale);
-            this.backgroundSprite.position.set(offsetX, offsetY);
+
+            // Get the town's grid dimensions from config
+            const townGridWidth = this.config.gridWidth;
+            const townGridHeight = this.config.gridHeight;
+
+            // Calculate the center position in pixels
+            const centerX = (townGridWidth * this.config.cellSize) / 2;
+            const centerY = (townGridHeight * this.config.cellSize) / 2;
+
+            // Apply offset to the center position
+            const finalX = centerX + offsetX;
+            const finalY = centerY + offsetY;
+            this.backgroundSprite.position.set(finalX, finalY);
 
             this.containers.backgroundImage.addChild(this.backgroundSprite);
-            console.log('[TownLayerManager] Background image set:', { imageUrl, scale, offsetX, offsetY });
+            console.log('[TownLayerManager] Background image set:', {
+                imageUrl,
+                scale,
+                offsetX,
+                offsetY,
+                townGridSize: { width: townGridWidth, height: townGridHeight },
+                centerPosition: { x: centerX, y: centerY },
+                finalPosition: { x: finalX, y: finalY }
+            });
         } catch (error) {
             console.error('[TownLayerManager] Failed to load background image:', error);
+        }
+    }
+
+    /**
+     * Sets background image scale
+     */
+    setBackgroundImageScale(scale: number): void {
+        console.log('[TownLayerManager] setBackgroundImageScale called:', scale);
+        if (this.backgroundSprite) {
+            this.backgroundSprite.scale.set(scale);
+            console.log('[TownLayerManager] Background sprite scale updated to:', scale);
+        }
+    }
+
+    /**
+     * Sets background image offset (relative to center)
+     */
+    setBackgroundImageOffset(offsetX: number, offsetY: number): void {
+        console.log('[TownLayerManager] setBackgroundImageOffset called:', { offsetX, offsetY });
+        if (this.backgroundSprite) {
+            // Calculate the base center position
+            const centerX = (this.config.gridWidth * this.config.cellSize) / 2;
+            const centerY = (this.config.gridHeight * this.config.cellSize) / 2;
+
+            // Apply offset to the center position
+            const finalX = centerX + offsetX;
+            const finalY = centerY + offsetY;
+            this.backgroundSprite.position.set(finalX, finalY);
+
+            console.log('[TownLayerManager] Background sprite position updated:', {
+                baseCenter: { x: centerX, y: centerY },
+                offset: { x: offsetX, y: offsetY },
+                finalPosition: { x: finalX, y: finalY }
+            });
+        }
+    }
+
+    /**
+     * Sets background image visibility
+     */
+    setBackgroundImageVisibility(visible: boolean): void {
+        console.log('[TownLayerManager] setBackgroundImageVisibility called:', visible, 'sprite exists:', !!this.backgroundSprite);
+        if (this.backgroundSprite) {
+            this.backgroundSprite.visible = visible;
+        }
+    }
+
+    /**
+     * Clears the background image
+     */
+    clearBackgroundImage(): void {
+        console.log('[TownLayerManager] clearBackgroundImage called');
+        if (this.backgroundSprite) {
+            this.containers.backgroundImage.removeChild(this.backgroundSprite);
+            this.backgroundSprite.destroy();
+            this.backgroundSprite = null;
         }
     }
 

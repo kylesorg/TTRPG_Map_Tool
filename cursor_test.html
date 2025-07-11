@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Cursor Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+
+        .cursor-test {
+            width: 200px;
+            height: 200px;
+            border: 2px solid #333;
+            margin: 20px;
+            display: inline-block;
+            background: white;
+            text-align: center;
+            line-height: 200px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        /* Small brush cursor */
+        .small-cursor {
+            cursor: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHZpZXdCb3g9IjAgMCAyMCAyMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8Y2lyY2xlIGN4PSIxMCIgY3k9IjEwIiByPSIzIiBmaWxsPSJub25lIiBzdHJva2U9IiMwMDAiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjEwIiBjeT0iMTAiIHI9IjEiIGZpbGw9IiMwMDAiLz4KPC9zdmc+') 10 10, crosshair;
+        }
+
+        /* Medium brush cursor */
+        .medium-cursor {
+            cursor: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSI1IiBmaWxsPSJub25lIiBzdHJva2U9IiMwMDAiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjIiIGZpbGw9IiMwMDAiLz4KPC9zdmc+') 12 12, crosshair;
+        }
+
+        /* Large brush cursor */
+        .large-cursor {
+            cursor: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAiIGhlaWdodD0iMzAiIHZpZXdCb3g9IjAgMCAzMCAzMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8Y2lyY2xlIGN4PSIxNSIgY3k9IjE1IiByPSI4IiBmaWxsPSJub25lIiBzdHJva2U9IiMwMDAiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjE1IiBjeT0iMTUiIHI9IjMiIGZpbGw9IiMwMDAiLz4KPC9zdmc+') 15 15, crosshair;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Brush Cursor Test</h1>
+    <p>Hover over each box to see the cursor for different brush sizes:</p>
+
+    <div class="cursor-test small-cursor">
+        SMALL<br>
+        (1.25px)
+    </div>
+
+    <div class="cursor-test medium-cursor">
+        MEDIUM<br>
+        (3.125px)
+    </div>
+
+    <div class="cursor-test large-cursor">
+        LARGE<br>
+        (5px)
+    </div>
+
+    <div style="clear: both;"></div>
+    <p>The cursors should show progressively larger circles with a center dot.</p>
+
+    <h2>SVG Source (for reference):</h2>
+    <h3>Small:</h3>
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
+        style="border: 1px solid #ccc; background: white;">
+        <circle cx="10" cy="10" r="3" fill="none" stroke="#000" stroke-width="2" />
+        <circle cx="10" cy="10" r="1" fill="#000" />
+    </svg>
+
+    <h3>Medium:</h3>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
+        style="border: 1px solid #ccc; background: white;">
+        <circle cx="12" cy="12" r="5" fill="none" stroke="#000" stroke-width="2" />
+        <circle cx="12" cy="12" r="2" fill="#000" />
+    </svg>
+
+    <h3>Large:</h3>
+    <svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg"
+        style="border: 1px solid #ccc; background: white;">
+        <circle cx="15" cy="15" r="8" fill="none" stroke="#000" stroke-width="2" />
+        <circle cx="15" cy="15" r="3" fill="#000" />
+    </svg>
+</body>
+
+</html>

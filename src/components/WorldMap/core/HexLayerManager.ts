@@ -2,6 +2,7 @@ import * as PIXI from 'pixi.js';
 import { axialToPixelOriented, type HexOrientation } from '../../../utils/hexMath';
 import { GRID_ROWS, GRID_COLS } from '../../../utils/constants';
 import type { DrawingPath } from '../../../types/mapTypes';
+import type { GeographyImageData } from '../../../utils/geographyImageManager';
 
 export interface LayerManagerConfig {
     tileSize: number;
@@ -59,13 +60,13 @@ export class HexLayerManager {
         this.app.stage.sortableChildren = true;
 
         const layerConfig = [
-            { container: this.containers.background, name: 'background', zIndex: 1 },
-            { container: this.containers.hexFills, name: 'hexFills', zIndex: 2 },
-            { container: this.containers.hexBorders, name: 'hexBorders', zIndex: 3 },
-            { container: this.containers.geography, name: 'geography', zIndex: 4 },
-            { container: this.containers.liveDrawing, name: 'liveDrawing', zIndex: 5 },
-            { container: this.containers.townNames, name: 'townNames', zIndex: 6 },
-            { container: this.containers.highlight, name: 'highlight', zIndex: 10 }
+            { container: this.containers.background, name: 'background', zIndex: 1 }, // Background image layer - under hex fills
+            { container: this.containers.hexFills, name: 'hexFills', zIndex: 2 }, // Hex biome fills (with transparency options)
+            { container: this.containers.hexBorders, name: 'hexBorders', zIndex: 3 }, // Hex border lines
+            { container: this.containers.geography, name: 'geography', zIndex: 4 }, // Geography/drawing layer
+            { container: this.containers.liveDrawing, name: 'liveDrawing', zIndex: 5 }, // Live drawing preview
+            { container: this.containers.townNames, name: 'townNames', zIndex: 6 }, // Town names
+            { container: this.containers.highlight, name: 'highlight', zIndex: 10 } // Selection highlight
         ];
 
         layerConfig.forEach(({ container, name, zIndex }) => {
@@ -77,6 +78,10 @@ export class HexLayerManager {
                 this.app.stage.addChild(container);
             }
         });
+
+        // Enable sorting by zIndex on the main stage
+        this.app.stage.sortableChildren = true;
+        this.app.stage.sortChildren();
     }
 
     /**
@@ -100,18 +105,6 @@ export class HexLayerManager {
             // Clear any existing children and add the sprite
             this.containers.geography.removeChildren();
             this.containers.geography.addChild(geographySprite);
-
-            console.log('[HexLayerManager] Geography layer initialized with render texture sprite:', {
-                spriteWidth: geographySprite.width,
-                spriteHeight: geographySprite.height,
-                spriteVisible: geographySprite.visible,
-                spriteAlpha: geographySprite.alpha,
-                spritePosition: { x: geographySprite.x, y: geographySprite.y },
-                containerVisible: this.containers.geography.visible,
-                containerAlpha: this.containers.geography.alpha,
-                containerPosition: { x: this.containers.geography.x, y: this.containers.geography.y },
-                containerChildren: this.containers.geography.children.length
-            });
         }
     }
 
@@ -142,9 +135,34 @@ export class HexLayerManager {
      * Gets the center coordinates of the hex grid
      */
     private getGridCenterCoordinates(): { q: number; r: number } {
-        const centerQ = Math.floor(GRID_COLS / 2);
-        const centerR = Math.floor(GRID_ROWS / 2);
-        return { q: centerQ, r: centerR };
+        // Calculate the center based on user coordinates, then convert to axial
+        const centerUserX = Math.floor(GRID_COLS / 2);
+        const centerUserY = Math.floor(GRID_ROWS / 2);
+
+        if (this.config.hexOrientation === 'pointy-top') {
+            // For pointy-top: use even-r offset coordinate conversion
+            const offsetCol = centerUserX;
+            const offsetRow = (GRID_ROWS - 1) - centerUserY;
+            const q_axial_offset = -Math.floor(GRID_COLS / 2);
+            const r_axial_offset = -Math.floor(GRID_ROWS / 2);
+
+            const q_axial = offsetCol - (offsetRow + (offsetRow & 1)) / 2 + q_axial_offset;
+            const r_axial = offsetRow + r_axial_offset;
+
+            return { q: q_axial, r: r_axial };
+        } else {
+            // For flat-top: use even-q offset coordinate conversion (existing logic)
+            const vCol = centerUserX;
+            const vRow_from_top = (GRID_ROWS - 1) - centerUserY;
+            const r_axial_offset = -(GRID_ROWS - 1);
+
+            const q_prime = vCol;
+            const r_prime = vRow_from_top - (vCol + (vCol & 1)) / 2;
+            const q_axial = q_prime;
+            const r_axial = r_prime + r_axial_offset;
+
+            return { q: q_axial, r: r_axial };
+        }
     }
 
     /**
@@ -169,8 +187,6 @@ export class HexLayerManager {
      * Renders drawing paths (geography features like roads and rivers)
      */
     renderDrawingPaths(drawingPaths: DrawingPath[], visible: boolean = true): void {
-        // Render drawing paths
-
         // Set geography layer visibility
         this.containers.geography.visible = visible;
 
@@ -179,26 +195,14 @@ export class HexLayerManager {
             return;
         }
 
-        // Geography layer visibility check passed
-
         // Clear existing drawings
         this.containers.geography.removeChildren();
 
-        // Draw paths directly to the geography container (no render texture)
-        drawingPaths.forEach((path, index) => {
-            console.log(`[HexLayerManager] Rendering path ${index}:`, {
-                id: path.id,
-                type: path.type,
-                pointCount: path.points.length,
-                color: path.color,
-                strokeWidth: path.strokeWidth
-            });
-
+        // Draw paths directly to the geography container
+        drawingPaths.forEach((path) => {
             const graphics = new PIXI.Graphics();
             const pathColor = path.color || '#000000'; // Default to black
             const strokeWidth = Math.max(path.strokeWidth || 2, 2); // Minimum 2px width
-
-            // Using drawing color and stroke width
 
             // Handle erasing
             if (pathColor === '#FFFFFF') {
@@ -207,82 +211,69 @@ export class HexLayerManager {
 
             // Draw the path with better quality
             if (path.points.length > 0) {
-                console.log('[HexLayerManager] Drawing path points:', {
-                    firstPoint: path.points[0],
-                    lastPoint: path.points[path.points.length - 1],
-                    totalPoints: path.points.length
-                });
-
-                // Use PIXI's graphics API for smoother lines
-                graphics.stroke({
+                // Set stroke style - use the correct PIXI v8 API
+                graphics.setStrokeStyle({
                     width: strokeWidth,
                     color: pathColor,
-                    cap: 'round',      // Round line caps for smoother ends
-                    join: 'round',     // Round line joins for smoother corners
-                    miterLimit: 10     // Better miter handling
+                    cap: 'round',
+                    join: 'round'
                 });
 
-                // Draw the path using moveTo and lineTo
+                // Begin path and draw the path using moveTo and lineTo
+                graphics.beginPath();
                 graphics.moveTo(path.points[0].x, path.points[0].y);
                 for (let i = 1; i < path.points.length; i++) {
                     graphics.lineTo(path.points[i].x, path.points[i].y);
                 }
-
-                console.log('[HexLayerManager] Graphics object after drawing:', {
-                    bounds: graphics.getBounds(),
-                    visible: graphics.visible,
-                    alpha: graphics.alpha
-                });
+                graphics.stroke(); // Actually draw the stroke
             }
 
             // Add directly to geography container
             this.containers.geography.addChild(graphics);
         });
 
-        console.log('[HexLayerManager] Added paths directly to geography container, total children:', this.containers.geography.children.length);
+        // Expose debug function globally for testing
+        (window as any).debugGeography = () => this.debugGeographyContainer();
     }
 
     /**
-     * Renders a live drawing preview path
+     * Renders a live drawing path - updates in real-time as user draws
      */
-    renderDrawingPreview(previewData: { points: { x: number; y: number }[], color: string, strokeWidth: number } | null): void {
-        // Render drawing preview
-
-        // Clear existing preview
+    renderLiveDrawing(liveDrawingData: { points: { x: number; y: number }[], color: string, strokeWidth: number } | null): void {
+        // Clear existing live drawing
         this.containers.liveDrawing.removeChildren();
 
-        // If no preview data, we're just clearing
-        if (!previewData || previewData.points.length < 2) {
+        // If no drawing data, we're just clearing
+        if (!liveDrawingData || liveDrawingData.points.length < 1) {
             return;
         }
 
-        // Create graphics for preview path
+        // Create graphics for live drawing path
         const graphics = new PIXI.Graphics();
-        const pathColor = previewData.color || '#000000';
-        const strokeWidth = Math.max(previewData.strokeWidth || 2, 2);
+        const pathColor = liveDrawingData.color || '#000000';
+        const strokeWidth = Math.max(liveDrawingData.strokeWidth || 2, 2);
 
-        console.log('[HexLayerManager] Drawing preview path with color:', pathColor, 'strokeWidth:', strokeWidth);
-
-        // Draw the preview path with slightly reduced opacity and improved quality
-        if (previewData.points.length > 0) {
-            // Use improved stroke settings for smooth preview lines
-            graphics.stroke({
+        // Draw the live path with full opacity for immediate feedback
+        if (liveDrawingData.points.length > 0) {
+            // Set stroke style for live drawing - use the correct PIXI v8 API
+            graphics.setStrokeStyle({
                 width: strokeWidth,
                 color: pathColor,
-                alpha: 0.7,        // Slightly transparent for preview
+                alpha: 1.0,        // Full opacity for live drawing
                 cap: 'round',      // Round line caps for smoother ends
-                join: 'round',     // Round line joins for smoother corners
-                miterLimit: 10     // Better miter handling
+                join: 'round'      // Round line joins for smoother corners
             });
 
-            graphics.moveTo(previewData.points[0].x, previewData.points[0].y);
-            for (let i = 1; i < previewData.points.length; i++) {
-                graphics.lineTo(previewData.points[i].x, previewData.points[i].y);
+            // Begin path and draw
+            graphics.beginPath();
+            graphics.moveTo(liveDrawingData.points[0].x, liveDrawingData.points[0].y);
+            for (let i = 1; i < liveDrawingData.points.length; i++) {
+                graphics.lineTo(liveDrawingData.points[i].x, liveDrawingData.points[i].y);
             }
+            graphics.stroke(); // Actually draw the stroke
 
             // Add to live drawing container
             this.containers.liveDrawing.addChild(graphics);
-            console.log('[HexLayerManager] Added preview path to liveDrawing container');
         }
     }
 
@@ -345,8 +336,6 @@ export class HexLayerManager {
 
             this.containers.townNames.addChild(text);
         });
-
-        console.log(`[HexLayerManager] Rendered ${towns.length} town names (scale: ${this.config.textScale})`);
     }
 
     /**
@@ -357,7 +346,7 @@ export class HexLayerManager {
     }
 
     /**
-     * Background image methods (placeholders for now)
+     * Background image methods
      */
     clearBackgroundImage(): void {
         if (this.backgroundSprite) {
@@ -381,7 +370,14 @@ export class HexLayerManager {
 
     setBackgroundImageOffset(offsetX: number, offsetY: number): void {
         if (this.backgroundSprite) {
-            this.backgroundSprite.position.set(offsetX, offsetY);
+            // Calculate the base center position
+            const { q: centerQ, r: centerR } = this.getGridCenterCoordinates();
+            const centerPixel = axialToPixelOriented(centerQ, centerR, this.config.tileSize, this.config.hexOrientation || 'flat-top');
+
+            // Apply offset to the center position
+            const finalX = centerPixel.x + offsetX;
+            const finalY = centerPixel.y + offsetY;
+            this.backgroundSprite.position.set(finalX, finalY);
         }
     }
 
@@ -389,6 +385,8 @@ export class HexLayerManager {
      * Loads a background image
      */
     async loadBackgroundImage(imageUrl: string): Promise<void> {
+        // Load background image (only log errors, not normal operation)
+
         try {
             // Clear previous background if it exists
             if (this.backgroundSprite) {
@@ -403,16 +401,71 @@ export class HexLayerManager {
             // Center the sprite anchor point
             this.backgroundSprite.anchor.set(0.5);
 
-            // Position at the actual hex grid center
+            // Position at the center hex of the grid
             const { q: centerQ, r: centerR } = this.getGridCenterCoordinates();
-            const centerPixel = axialToPixelOriented(centerQ, centerR, this.config.tileSize, this.config.hexOrientation);
+            const centerPixel = axialToPixelOriented(centerQ, centerR, this.config.tileSize, this.config.hexOrientation || 'flat-top');
             this.backgroundSprite.position.set(centerPixel.x, centerPixel.y);
 
             // Add to background container
             this.containers.background.addChild(this.backgroundSprite);
+
+            // Ensure proper layer ordering
+            this.app.stage.sortChildren();
+
         } catch (error) {
             console.error('[HexLayerManager] Failed to load background image:', error);
         }
+    }
+
+    /**
+     * Debug method to test background image positioning
+     */
+    debugBackgroundImagePosition(): void {
+        if (!this.backgroundSprite) {
+            console.log('[HexLayerManager] No background sprite loaded');
+            return;
+        }
+
+        const gridCenter = this.getGridCenterCoordinates();
+        const centerPixel = axialToPixelOriented(gridCenter.q, gridCenter.r, this.config.tileSize, this.config.hexOrientation || 'flat-top');
+
+        console.log('[HexLayerManager] Background Image Debug:', {
+            gridCenter,
+            centerPixel,
+            spritePosition: { x: this.backgroundSprite.x, y: this.backgroundSprite.y },
+            spriteVisible: this.backgroundSprite.visible,
+            containerPosition: { x: this.containers.background.x, y: this.containers.background.y }
+        });
+
+        // Expose this function globally for manual testing
+        (window as any).debugBackgroundImage = () => this.debugBackgroundImagePosition();
+    }
+
+    /**
+     * Debug method to get geography container state
+     */
+    debugGeographyContainer(): any {
+        return {
+            childCount: this.containers.geography.children.length,
+            visible: this.containers.geography.visible,
+            alpha: this.containers.geography.alpha,
+            position: {
+                x: this.containers.geography.x,
+                y: this.containers.geography.y
+            },
+            scale: {
+                x: this.containers.geography.scale.x,
+                y: this.containers.geography.scale.y
+            },
+            children: this.containers.geography.children.map((child, index) => ({
+                index,
+                type: child.constructor.name,
+                visible: child.visible,
+                alpha: child.alpha,
+                bounds: child.getBounds(),
+                localBounds: child.getLocalBounds()
+            }))
+        };
     }
 
     /**
@@ -438,14 +491,72 @@ export class HexLayerManager {
         this.config.textScale = scale;
         // Force re-render by resetting the scale tracking
         this.lastTextScale = -1;
-        console.log(`[HexLayerManager] Text scale updated to: ${scale}`);
     }
 
-    setHexOrientation(_orientation: HexOrientation): void {
-        // Placeholder implementation
+    setHexOrientation(orientation: HexOrientation): void {
+        this.config.hexOrientation = orientation;
+
+        // Reposition background image if it exists
+        if (this.backgroundSprite) {
+            const { q: centerQ, r: centerR } = this.getGridCenterCoordinates();
+            const centerPixel = axialToPixelOriented(centerQ, centerR, this.config.tileSize, orientation);
+            this.backgroundSprite.position.set(centerPixel.x, centerPixel.y);
+        }
     }
 
     updateBackgroundImageForOrientation(): void {
-        // Placeholder implementation
+        // This method is called when orientation changes to reposition the background image
+        if (this.backgroundSprite) {
+            const { q: centerQ, r: centerR } = this.getGridCenterCoordinates();
+            const centerPixel = axialToPixelOriented(centerQ, centerR, this.config.tileSize, this.config.hexOrientation || 'flat-top');
+            this.backgroundSprite.position.set(centerPixel.x, centerPixel.y);
+        }
+    }
+
+    /**
+     * Loads and displays a geography image
+     */
+    async loadGeographyImage(imageData: GeographyImageData | null, visible: boolean = true): Promise<void> {
+        // Set geography layer visibility
+        this.containers.geography.visible = visible;
+
+        // Clear existing geography content (paths or images)
+        this.containers.geography.removeChildren();
+
+        if (!visible || !imageData) {
+            return;
+        }
+
+        try {
+            // Create an image element from the base64 data
+            const img = new Image();
+            img.src = imageData.imageDataUrl;
+
+            await new Promise<void>((resolve, reject) => {
+                img.onload = () => resolve();
+                img.onerror = () => reject(new Error('Failed to load geography image'));
+            });
+
+            // Create a PIXI texture from the image
+            const texture = PIXI.Texture.from(img);
+            const sprite = new PIXI.Sprite(texture);
+
+            // Position the image at the origin (0,0) since it's pre-centered
+            sprite.position.set(imageData.offsetX, imageData.offsetY);
+            sprite.scale.set(imageData.scale);
+            sprite.anchor.set(0.5); // Center the sprite
+
+            // Add to geography container
+            this.containers.geography.addChild(sprite);
+
+            console.log('[HexLayerManager] Geography image loaded and displayed:', {
+                size: { width: imageData.width, height: imageData.height },
+                position: { x: imageData.offsetX, y: imageData.offsetY },
+                scale: imageData.scale
+            });
+
+        } catch (error) {
+            console.error('[HexLayerManager] Failed to load geography image:', error);
+        }
     }
 }

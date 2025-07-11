@@ -1,11 +1,16 @@
-import React, { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo, useImperativeHandle, forwardRef } from 'react';
 import * as PIXI from 'pixi.js';
 import { HexGridManager, type HexGridManagerConfig } from './core/HexGridManager';
 import { TILE_SIZE, MAX_ZOOM_LEVEL, HEX_BUFFER } from '../../utils/constants';
 import type { HexTile, Biome, DrawingPath } from '../../types/mapTypes';
 import type { ToolMode } from '../../types/sharedTypes';
 import type { HexOrientation } from '../../utils/hexMath'; // NEW: Import hex orientation type
+import type { GeographyImageData } from '../../utils/geographyImageManager';
 import { debounce } from '../../utils/debounce';
+
+export interface HexGridWebGLRef {
+    cleanupDrawingState: () => void;
+}
 
 export interface HexGridWebGLProps {
     hexTiles: HexTile[];
@@ -27,6 +32,7 @@ export interface HexGridWebGLProps {
     brushSize: number;
     brushColor: string;
     isErasing: boolean;
+    geographyImage: GeographyImageData | null;
     // New props for layer visibility and styling
     gridLinesVisible: boolean;
     gridLineThickness: number;
@@ -43,7 +49,7 @@ export interface HexGridWebGLProps {
     hexOrientation?: HexOrientation;
 }
 
-const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
+const HexGridWebGL = forwardRef<HexGridWebGLRef, HexGridWebGLProps>(({
     hexTiles,
     onHexClick,
     currentTool,
@@ -60,6 +66,7 @@ const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
     brushSize,
     brushColor,
     isErasing,
+    geographyImage,
     gridLinesVisible,
     gridLineThickness,
     gridLineColor,
@@ -72,11 +79,20 @@ const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
     backgroundImageOffsetY,
     backgroundImageVisible,
     hexOrientation, // NEW: Destructure hexOrientation prop
-}) => {
+}, ref) => {
     const pixiContainerRef = useRef<HTMLDivElement>(null);
     const appRef = useRef<PIXI.Application | null>(null);
     const gridManagerRef = useRef<HexGridManager | null>(null);
     const [pixiInitialized, setPixiInitialized] = useState(false);
+
+    // Expose cleanup method to parent component
+    useImperativeHandle(ref, () => ({
+        cleanupDrawingState: () => {
+            if (gridManagerRef.current) {
+                gridManagerRef.current.cleanupDrawingState();
+            }
+        }
+    }));
 
     // Effect to update cursor style - no longer needed since we use CSS classes
     // The cursor is now controlled by the className on the container div
@@ -136,6 +152,24 @@ const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
 
                 appRef.current = app;
                 gridManagerRef.current = gridManager;
+
+                // Expose debug function and grid manager to window after initialization
+                (window as any).debugHexCoordinates = () => {
+                    if (gridManagerRef.current) {
+                        gridManagerRef.current.debugCoordinateRanges();
+                    } else {
+                        console.log('Grid manager not available');
+                    }
+                };
+                (window as any).debugCoordinatesDetailed = () => {
+                    if (gridManagerRef.current) {
+                        gridManagerRef.current.debugCoordinatesDetailed();
+                    } else {
+                        console.log('Grid manager not available');
+                    }
+                };
+                (window as any).hexGridManager = gridManager;
+
                 setPixiInitialized(true);
             };
 
@@ -217,6 +251,13 @@ const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
         }
     }, [pixiInitialized, drawingLayer, geographyVisible]);
 
+    // Update geography image
+    useEffect(() => {
+        if (pixiInitialized && gridManagerRef.current) {
+            gridManagerRef.current.loadGeographyImage(geographyImage, geographyVisible);
+        }
+    }, [pixiInitialized, geographyImage, geographyVisible]);
+
     // Update grid line thickness
     useEffect(() => {
         if (pixiInitialized && gridManagerRef.current) {
@@ -242,7 +283,10 @@ const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
     useEffect(() => {
         if (pixiInitialized && gridManagerRef.current) {
             if (backgroundImageUrl) {
-                gridManagerRef.current.loadBackgroundImage(backgroundImageUrl);
+                // Load background image (only log errors, not normal operation)
+                gridManagerRef.current.loadBackgroundImage(backgroundImageUrl).catch(error => {
+                    console.error('[HexGridWebGL] Failed to load background image:', error);
+                });
             } else {
                 // Clear background image when URL is null
                 gridManagerRef.current.clearBackgroundImage();
@@ -315,21 +359,33 @@ const HexGridWebGL: React.FC<HexGridWebGLProps> = React.memo(({
         handleResize(); // Initial call
 
         return () => resizeObserver.disconnect();
-    }, [pixiInitialized]);
+    }, [pixiInitialized]);    // Dynamic cursor class based on tool mode
+    const cursorClass = useMemo(() => {
+        console.log(`[HexGridWebGL] Recalculating cursor class - Tool: ${currentTool}, Brush size: ${brushSize}, Erasing: ${isErasing}`);
 
-    // Dynamic cursor class based on tool mode
-    const getCursorClass = () => {
         if (currentTool === 'geography') {
-            return isErasing ? 'geography-tool-erase-cursor' : 'geography-tool-draw-cursor';
+            // Use the same size-specific cursors for both drawing and erasing
+            let cursorClass;
+            if (brushSize <= 1.25) {
+                cursorClass = 'geography-tool-draw-cursor-small';
+            } else if (brushSize <= 3.125) {
+                cursorClass = 'geography-tool-draw-cursor-medium';
+            } else {
+                cursorClass = 'geography-tool-draw-cursor-large';
+            }
+            console.log(`[HexGridWebGL] Selected cursor class: ${cursorClass} for brush size: ${brushSize}, erasing: ${isErasing}`);
+            return cursorClass;
         }
         return '';
-    };
+    }, [currentTool, isErasing, brushSize]);
 
     return <div
         ref={pixiContainerRef}
         style={{ width: '100%', height: '100%', position: 'relative', pointerEvents: 'auto' }}
-        className={getCursorClass()}
+        className={cursorClass}
     />;
 });
+
+HexGridWebGL.displayName = 'HexGridWebGL';
 
 export default HexGridWebGL;

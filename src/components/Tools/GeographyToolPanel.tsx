@@ -29,6 +29,31 @@ const GeographyToolPanel: React.FC<GeographyToolPanelProps> = ({
         }
     };
 
+    // Helper function to determine if color has transparency
+    const hasTransparency = (colorString: string): boolean => {
+        if (colorString.includes('rgba')) {
+            const alpha = parseFloat(colorString.split(',')[3]?.replace(')', '').trim() || '1');
+            return alpha < 1;
+        }
+        return false;
+    };
+
+    // Create style object for color preview
+    const colorPreviewStyle: React.CSSProperties = {
+        height: '28px',
+        width: '60px',
+        border: '1px solid #888',
+        borderRadius: '4px',
+        backgroundColor: color,
+        cursor: isErasing ? 'not-allowed' : 'pointer',
+        opacity: isErasing ? 0.5 : 1,
+        // Only show transparency pattern for transparent colors
+        ...(hasTransparency(color) ? {
+            backgroundImage: 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAADBJREFUOE9jfPfs2X8GPEBTEMpAchAqQArTMDY2NjI2Nt4G8eO/T2gAS4YPAAAAAP//AwCGMAl4NB46AAAAAElFTkSuQmCC")',
+            backgroundRepeat: 'repeat',
+        } : {}),
+    };
+
     const cover: React.CSSProperties = {
         position: 'fixed',
         top: '0px',
@@ -52,17 +77,7 @@ const GeographyToolPanel: React.FC<GeographyToolPanelProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                     <label style={{ margin: 0 }}>Color:</label>
                     <div
-                        style={{
-                            height: '28px',
-                            width: '60px',
-                            border: '1px solid #888',
-                            borderRadius: '4px',
-                            backgroundColor: color,
-                            cursor: isErasing ? 'not-allowed' : 'pointer',
-                            opacity: isErasing ? 0.5 : 1,
-                            backgroundImage: 'url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAADBJREFUOE9jfPbs2X8GPEBTEMpAchAqQArTMDY2NjI2Nt4G8eO/T2gAS4YPAAAAAP//AwCGMAl4NB46AAAAAElFTkSuQmCC")',
-                            backgroundRepeat: 'repeat',
-                        }}
+                        style={colorPreviewStyle}
                         onClick={() => { if (!isErasing) { console.log('[GeographyToolPanel] color:', color); setDisplayColorPicker(true); } }}
                         title={isErasing ? "Turn off eraser to select color" : "Select Color"}
                     />

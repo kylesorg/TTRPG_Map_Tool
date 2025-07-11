@@ -1,6 +1,6 @@
 // Basic Hexagonal Grid Math Utilities
 
-import type { HexCoordinates } from '../types/mapTypes';
+import type { HexCoordinates, DrawingPath } from '../types/mapTypes';
 
 // ====================================================================
 // FLAT-TOP HEX MATH FUNCTIONS
@@ -203,4 +203,184 @@ export function pixelToAxialOriented(
 ): HexCoordinates {
     const config = getHexOrientation(orientation);
     return config.pixelToAxial(x, y, size);
+}
+
+/**
+ * Converts axial coordinates back to user coordinates (labelX, labelY)
+ * This is the inverse of the coordinate conversion in generateTestHexGrid
+ */
+export function axialToUserCoordinates(
+    q_axial: number,
+    r_axial: number,
+    gridRows: number,
+    gridCols: number,
+    orientation: HexOrientation = 'flat-top'
+): { labelX: number; labelY: number } | null {
+    if (orientation === 'flat-top') {
+        // Reverse the flat-top conversion from generateFlatTopGrid
+        const r_axial_offset = -(gridRows - 1);
+
+        // Convert back from axial to intermediate coordinates
+        const q_prime = q_axial;
+        const r_prime = r_axial - r_axial_offset;
+
+        // Convert back from intermediate to visual offset coordinates
+        const vCol = q_prime;
+        const vRow_from_top = r_prime + (vCol + (vCol & 1)) / 2;
+
+        // Convert back to user coordinates
+        const userX = vCol;
+        const userY = (gridRows - 1) - vRow_from_top;
+
+        // Check bounds
+        if (userX >= 0 && userX < gridCols && userY >= 0 && userY < gridRows) {
+            return { labelX: userX, labelY: userY };
+        }
+    } else {
+        // Reverse the pointy-top conversion from generatePointyTopGrid
+        const q_axial_offset = -Math.floor(gridCols / 2);
+        const r_axial_offset = -Math.floor(gridRows / 2);
+
+        // Convert back from axial to offset coordinates
+        const offsetCol = q_axial - q_axial_offset + (r_axial - r_axial_offset + (r_axial - r_axial_offset & 1)) / 2;
+        const offsetRow = r_axial - r_axial_offset;
+
+        // Convert back to user coordinates
+        const userX = offsetCol;
+        const userY = (gridRows - 1) - offsetRow;
+
+        // Check bounds
+        if (userX >= 0 && userX < gridCols && userY >= 0 && userY < gridRows) {
+            return { labelX: userX, labelY: userY };
+        }
+    }
+
+    return null; // Out of bounds
+}
+
+// ====================================================================
+// DRAWING PATH TRANSFORMATION FUNCTIONS
+// ====================================================================
+
+/**
+ * Transforms drawing paths from one hex orientation to another.
+ * This is needed when switching between flat-top and pointy-top modes
+ * so that geography lines appear in the correct positions.
+ */
+export function transformDrawingPathsForOrientation(
+    paths: DrawingPath[],
+    fromOrientation: HexOrientation,
+    toOrientation: HexOrientation,
+    tileSize: number,
+    gridRows: number,
+    gridCols: number
+): DrawingPath[] {
+    if (fromOrientation === toOrientation) {
+        return paths; // No transformation needed
+    }
+
+    return paths.map(path => ({
+        ...path,
+        points: path.points.map(point =>
+            transformPointForOrientation(
+                point,
+                fromOrientation,
+                toOrientation,
+                tileSize,
+                gridRows,
+                gridCols
+            )
+        )
+    }));
+}
+
+/**
+ * Transforms a single point from one hex orientation to another
+ */
+function transformPointForOrientation(
+    point: { x: number; y: number },
+    fromOrientation: HexOrientation,
+    toOrientation: HexOrientation,
+    tileSize: number,
+    _gridRows: number,
+    _gridCols: number
+): { x: number; y: number } {
+    if (fromOrientation === toOrientation) {
+        return point;
+    }
+
+    // Step 1: Convert pixel point to axial coordinates using the source orientation
+    const fromConfig = getHexOrientation(fromOrientation);
+    const axial = fromConfig.pixelToAxial(point.x, point.y, tileSize);
+
+    // Step 2: Convert axial coordinates back to pixel using the target orientation
+    const toConfig = getHexOrientation(toOrientation);
+    return toConfig.axialToPixel(axial.q, axial.r, tileSize);
+}
+
+/**
+ * Alternative transformation that preserves relative positions within the grid bounds.
+ * This method normalizes coordinates to [0,1] range and then scales to new orientation.
+ */
+export function transformDrawingPathsRelative(
+    paths: DrawingPath[],
+    fromOrientation: HexOrientation,
+    toOrientation: HexOrientation,
+    tileSize: number,
+    gridRows: number,
+    gridCols: number
+): DrawingPath[] {
+    if (fromOrientation === toOrientation) {
+        return paths;
+    }
+
+    // Calculate the bounds for both orientations
+    const fromBounds = calculateGridBounds(fromOrientation, tileSize, gridRows, gridCols);
+    const toBounds = calculateGridBounds(toOrientation, tileSize, gridRows, gridCols);
+
+    return paths.map(path => ({
+        ...path,
+        points: path.points.map(point => {
+            // Normalize point to [0,1] range based on source bounds
+            const normalizedX = (point.x - fromBounds.minX) / (fromBounds.maxX - fromBounds.minX);
+            const normalizedY = (point.y - fromBounds.minY) / (fromBounds.maxY - fromBounds.minY);
+
+            // Scale to target bounds
+            const transformedX = toBounds.minX + normalizedX * (toBounds.maxX - toBounds.minX);
+            const transformedY = toBounds.minY + normalizedY * (toBounds.maxY - toBounds.minY);
+
+            return { x: transformedX, y: transformedY };
+        })
+    }));
+}
+
+/**
+ * Calculate the pixel bounds of a hex grid for a given orientation
+ */
+function calculateGridBounds(
+    orientation: HexOrientation,
+    tileSize: number,
+    gridRows: number,
+    gridCols: number
+): { minX: number; maxX: number; minY: number; maxY: number } {
+    const config = getHexOrientation(orientation);
+
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    // Sample points around the grid perimeter to find bounds
+    for (let row = 0; row < gridRows; row++) {
+        for (let col = 0; col < gridCols; col++) {
+            // Convert user coordinates to axial then to pixel
+            const axial = userToAxial(col, row, gridRows, gridCols, orientation);
+            const pixel = config.axialToPixel(axial.q, axial.r, tileSize);
+
+            minX = Math.min(minX, pixel.x);
+            maxX = Math.max(maxX, pixel.x);
+            minY = Math.min(minY, pixel.y);
+            maxY = Math.max(maxY, pixel.y);
+        }
+    }
+
+    return { minX, maxX, minY, maxY };
 }

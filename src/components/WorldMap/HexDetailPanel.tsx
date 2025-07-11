@@ -84,7 +84,7 @@ const HexDetailPanel: React.FC<HexDetailPanelProps> = ({
     return (
         <div style={{ padding: '10px' }}>
             <h3>Hex Details</h3>
-            <p>Coords X: {selectedHex.labelX}, Y: {selectedHex.labelY}</p>
+            <p>Coords X: {selectedHex.labelX ?? 'N/A'}, Y: {selectedHex.labelY ?? 'N/A'}</p>
             <p>Axial Coords (q,r,s): {selectedHex.coordinates.q}, {selectedHex.coordinates.r}, {-selectedHex.coordinates.q - selectedHex.coordinates.r}</p>
             <p>Biome: {selectedHex.biome.name}</p>
             <p>Color: <span style={{ display: 'inline-block', width: '12px', height: '12px', backgroundColor: selectedHex.biome.color, border: '1px solid #555' }}></span> {selectedHex.biome.color}</p>

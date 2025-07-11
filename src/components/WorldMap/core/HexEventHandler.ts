@@ -11,8 +11,9 @@ export interface HexEventHandlerConfig {
     onPaintHexBatch: (batch: Array<{ hexId: string }>, tool: ToolMode) => void;
     onPaintComplete?: (lastPaintedHex: HexTile) => void;
     onNewPath?: (newPath: any) => void;
-    onDrawingPreview?: (previewPath: { points: { x: number; y: number }[], color: string, strokeWidth: number } | null) => void;
+    onLiveDrawing?: (liveDrawingPath: { points: { x: number; y: number }[], color: string, strokeWidth: number } | null) => void;
     onErasePaths?: (erasePoint: { x: number; y: number }, eraseRadius: number) => void;
+    gridManager?: { worldPixelToHex: (worldX: number, worldY: number) => HexTile | null }; // NEW: Optional grid manager for better coordinate conversion
 }
 
 export interface HexEventHandlerState {
@@ -36,9 +37,7 @@ export class HexEventHandler {
     private config: HexEventHandlerConfig;
     private state: HexEventHandlerState;
     private fillsContainer: PIXI.Container;
-    // Throttled preview for live drawing feedback
-    private throttledDrawingPreview: ((previewData: { points: { x: number; y: number }[], color: string, strokeWidth: number } | null) => void) | null = null;
-    // Throttled erase function to prevent spam
+    // Live drawing with immediate updates - no throttling, no preview complexity
     private throttledErase: ((erasePoint: { x: number; y: number }, eraseRadius: number) => void) | null = null;
 
     constructor(
@@ -62,19 +61,9 @@ export class HexEventHandler {
             currentDrawingPath: null
         };
 
-        // Create throttled preview function - update every 25ms for smooth feedback (40fps)
-        if (this.config.onDrawingPreview) {
-            this.throttledDrawingPreview = throttle(this.config.onDrawingPreview, 25);
-        }
-
-        // Create throttled erase function - limit erase calls to 50ms intervals (20fps) to prevent spam
+        // Create throttled erase function to prevent spam
         if (this.config.onErasePaths) {
-            this.throttledErase = throttle(this.config.onErasePaths, 50);
-        }
-
-        // Create throttled erase function - update every 100ms to reduce spam
-        if (this.config.onErasePaths) {
-            this.throttledErase = throttle(this.config.onErasePaths, 100);
+            this.throttledErase = throttle(this.config.onErasePaths, 16);
         }
     }
 
@@ -120,16 +109,19 @@ export class HexEventHandler {
         this.fillsContainer.interactive = true;
 
         // Create a large invisible hit area that covers the whole screen and beyond
-        const hitAreaSize = 10000;
+        const hitAreaSize = 20000; // Increased from 10000 to be extra sure
         this.fillsContainer.hitArea = new PIXI.Rectangle(-hitAreaSize, -hitAreaSize, hitAreaSize * 2, hitAreaSize * 2);
+
+        // Container setup complete - only log errors if they occur
 
         this.fillsContainer.on('pointerdown', (event: PIXI.FederatedPointerEvent) => {
             const { x, y } = event.data.global;
-            // Pointer down event
 
             // Only handle left-click (button 0) for tool interactions
             if (event.data.button === 0) {
                 this.handleToolPointerDown(event, x, y);
+            } else {
+                console.log(`[HexEventHandler] Non-left-click ignored, button: ${event.data.button}`);
             }
         });
 
@@ -272,14 +264,8 @@ export class HexEventHandler {
                 // Get the fresh hex data from the current hex tiles array
                 const freshHex = this.state.hexTiles.find(h => h.id === this.state.lastPaintedHex!.id);
                 if (freshHex) {
-                    console.log('[HexEventHandler] Paint complete - using fresh hex data:', {
-                        hexId: freshHex.id,
-                        biomeName: freshHex.biome?.name,
-                        biomeColor: freshHex.biome?.color
-                    });
                     this.config.onPaintComplete(freshHex);
                 } else {
-                    console.log('[HexEventHandler] Paint complete - fresh hex not found, using cached hex');
                     this.config.onPaintComplete(this.state.lastPaintedHex);
                 }
             }
@@ -305,7 +291,8 @@ export class HexEventHandler {
             // Erasing mode - start actively erasing at this point
             this.state.isActivelyErasing = true;
             if (this.throttledErase) {
-                const eraseRadius = this.state.brushSize * 2; // Make erase radius larger than brush size
+                // Use brush size + small buffer for better erasing accuracy
+                const eraseRadius = this.state.brushSize + 1;
                 this.throttledErase(worldPoint, eraseRadius);
             }
         } else {
@@ -313,14 +300,8 @@ export class HexEventHandler {
             this.state.isDrawing = true;
             this.state.currentDrawingPath = [{ x: worldPoint.x, y: worldPoint.y }];
 
-            console.log('[HexEventHandler] Started geography drawing at:', {
-                x: worldPoint.x,
-                y: worldPoint.y,
-                isDrawing: this.state.isDrawing
-            });
-
-            // Show initial preview
-            this.updateDrawingPreview();
+            // Start live drawing immediately - no preview, just real drawing
+            this.updateLiveDrawing();
         }
     }
 
@@ -330,7 +311,8 @@ export class HexEventHandler {
         if (this.state.isActivelyErasing) {
             // Continue erasing while moving (only when mouse is down)
             if (this.throttledErase) {
-                const eraseRadius = this.state.brushSize * 2;
+                // Use brush size + small buffer for better erasing accuracy
+                const eraseRadius = this.state.brushSize + 1;
                 this.throttledErase(worldPoint, eraseRadius);
             }
         } else if (this.state.isDrawing && this.state.currentDrawingPath) {
@@ -341,25 +323,24 @@ export class HexEventHandler {
                 Math.pow(worldPoint.y - lastPoint.y, 2)
             );
 
-            // Only add point if it's at least 2 pixels away from the last point
-            // This reduces noise and creates smoother lines
-            const minDistance = 2;
+            // Higher sampling rate: 0.5px minimum distance for smoother curves
+            const minDistance = 0.5;
             if (distance >= minDistance) {
                 this.state.currentDrawingPath.push({ x: worldPoint.x, y: worldPoint.y });
-                this.updateDrawingPreview();
+                this.updateLiveDrawing();
             }
         }
     }
 
     private handleGeographyToolPointerUp(_event: PIXI.FederatedPointerEvent): void {
+        // Clear live drawing immediately on pointer up
+        this.clearLiveDrawing();
+
         if (this.state.isActivelyErasing) {
             // Stop actively erasing on pointer up
             this.state.isActivelyErasing = false;
             return;
         }
-
-        // Clear preview first
-        this.clearDrawingPreview();
 
         if (!this.state.isDrawing || !this.state.currentDrawingPath || this.state.currentDrawingPath.length < 2) {
             console.log('[HexEventHandler] Geography drawing ended - insufficient points or not drawing');
@@ -368,19 +349,16 @@ export class HexEventHandler {
             return;
         }
 
-        // Create a drawing path from the collected points with smoothing
-        const smoothedPoints = this.smoothPath(this.state.currentDrawingPath);
+        // Create a drawing path from the collected points (no smoothing needed with higher sampling)
         const drawingPath = {
             id: `path_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: 'road' as const, // Default to road for now
-            points: smoothedPoints,
+            points: this.state.currentDrawingPath, // Use raw points - higher density means no smoothing needed
             color: this.state.brushColor,
             strokeWidth: this.state.brushSize
         };
 
         console.log('[HexEventHandler] Geography drawing complete - created path:', {
             id: drawingPath.id,
-            type: drawingPath.type,
             pointCount: drawingPath.points.length,
             color: drawingPath.color,
             strokeWidth: drawingPath.strokeWidth
@@ -394,12 +372,45 @@ export class HexEventHandler {
         // Reset drawing state
         this.state.isDrawing = false;
         this.state.currentDrawingPath = null;
-    }    /**
+    }
+
+    /**
+     * Update live drawing - sends current path to be drawn immediately
+     */
+    private updateLiveDrawing(): void {
+        if (this.config.onLiveDrawing && this.state.currentDrawingPath && this.state.currentDrawingPath.length > 0) {
+            this.config.onLiveDrawing({
+                points: [...this.state.currentDrawingPath], // Copy the array
+                color: this.state.brushColor,
+                strokeWidth: this.state.brushSize
+            });
+        }
+    }
+
+    /**
+     * Clear live drawing
+     */
+    private clearLiveDrawing(): void {
+        if (this.config.onLiveDrawing) {
+            this.config.onLiveDrawing(null);
+        }
+    }
+
+    /**
      * Converts screen coordinates to hex tile
      */
     private getHexAtScreenPoint(screenX: number, screenY: number): HexTile | null {
         // Convert screen to world coordinates
         const worldPoint = this.fillsContainer.toLocal(new PIXI.Point(screenX, screenY));
+
+        // Use grid manager's more accurate conversion if available
+        if (this.config.gridManager) {
+            const result = this.config.gridManager.worldPixelToHex(worldPoint.x, worldPoint.y);
+            return result;
+        }
+
+        // Fallback to the previous method if grid manager is not available
+        console.log(`[HexEventHandler] Grid manager not available, using fallback method`);
 
         // Convert world to axial coordinates (orientation-aware)
         const axial = pixelToAxialOriented(worldPoint.x, worldPoint.y, this.config.tileSize, this.config.hexOrientation || 'flat-top');
@@ -408,7 +419,38 @@ export class HexEventHandler {
         const q = Math.round(axial.q);
         const r = Math.round(axial.r);
 
-        const foundHex = this.state.hexTiles.find(h => h.coordinates.q === q && h.coordinates.r === r);
+        // First try exact match
+        let foundHex = this.state.hexTiles.find(h => h.coordinates.q === q && h.coordinates.r === r);
+
+        if (foundHex) {
+            return foundHex;
+        }
+
+        // If exact match fails, try to find the closest hex within a reasonable radius
+        let bestHex: HexTile | null = null;
+        let bestDistance = Infinity;
+        const maxSearchRadius = 2; // Search within 2 hex units
+
+        for (const hex of this.state.hexTiles) {
+            // Calculate axial distance
+            const dq = Math.abs(hex.coordinates.q - q);
+            const dr = Math.abs(hex.coordinates.r - r);
+            const ds = Math.abs(hex.coordinates.s - (-q - r));
+            const distance = Math.max(dq, dr, ds); // Axial distance is max of coordinate differences
+
+            if (distance <= maxSearchRadius && distance < bestDistance) {
+                bestDistance = distance;
+                bestHex = hex;
+            }
+        }
+
+        if (bestHex) {
+            console.log(`[HexEventHandler] Found nearby hex at q=${bestHex.coordinates.q}, r=${bestHex.coordinates.r} (distance=${bestDistance})`);
+            foundHex = bestHex;
+        } else {
+            console.log(`[HexEventHandler] No hex found within search radius of q=${q}, r=${r}`);
+        }
+
         return foundHex || null;
     }
 
@@ -439,60 +481,23 @@ export class HexEventHandler {
     setBrushSettings(color: string, size: number, isErasing: boolean): void {
         this.state.brushColor = color;
         this.state.brushSize = size;
+
+        // If switching to/from erase mode, clear any stuck live drawing
+        if (this.state.isErasing !== isErasing) {
+            this.clearLiveDrawing();
+        }
+
         this.state.isErasing = isErasing;
-        console.log('[HexEventHandler] Updated brush settings:', { color, size, isErasing });
     }
 
     /**
-     * Updates the drawing preview with current path
+     * Cleanup method - clears any ongoing drawing state
      */
-    private updateDrawingPreview(): void {
-        if (this.throttledDrawingPreview && this.state.currentDrawingPath && this.state.currentDrawingPath.length > 0) {
-            this.throttledDrawingPreview({
-                points: [...this.state.currentDrawingPath],
-                color: this.state.brushColor,
-                strokeWidth: this.state.brushSize
-            });
-        }
-    }
-
-    /**
-     * Clears the drawing preview
-     */
-    private clearDrawingPreview(): void {
-        if (this.throttledDrawingPreview) {
-            this.throttledDrawingPreview(null);
-        }
-    }
-
-    /**
-     * Smooths a path using a simple averaging algorithm
-     */
-    private smoothPath(points: { x: number; y: number }[]): { x: number; y: number }[] {
-        if (points.length <= 2) return points;
-
-        const smoothed: { x: number; y: number }[] = [];
-
-        // Keep first point
-        smoothed.push(points[0]);
-
-        // Smooth middle points using weighted average
-        for (let i = 1; i < points.length - 1; i++) {
-            const prev = points[i - 1];
-            const curr = points[i];
-            const next = points[i + 1];
-
-            // Weighted average: 25% previous, 50% current, 25% next
-            const smoothX = prev.x * 0.25 + curr.x * 0.5 + next.x * 0.25;
-            const smoothY = prev.y * 0.25 + curr.y * 0.5 + next.y * 0.25;
-
-            smoothed.push({ x: smoothX, y: smoothY });
-        }
-
-        // Keep last point
-        smoothed.push(points[points.length - 1]);
-
-        return smoothed;
+    cleanup(): void {
+        this.clearLiveDrawing();
+        this.state.isDrawing = false;
+        this.state.isActivelyErasing = false;
+        this.state.currentDrawingPath = null;
     }
 
     /**

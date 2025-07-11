@@ -46,6 +46,13 @@ export interface ComprehensiveMapData {
     worldMap: {
         name: string;
         backgroundImage?: BackgroundImageInfo;
+        viewSettings?: {
+            gridLinesVisible: boolean;
+            gridLineThickness: number;
+            gridLineColor: string;
+            textScale: number;
+            showTownNames: boolean;
+        };
         hexes: Record<string, {
             coordinates: { q: number; r: number; s: number };
             biome: string; // Reference to biome name
@@ -114,7 +121,7 @@ export class MapDataManager {
     private static currentMapData: ComprehensiveMapData | null = null;
     private static isDirty = false;
     private static lastSaveTime = 0;
-    private static saveDebounceMs = 5000; // Save every 5 seconds when dirty
+    private static saveDebounceMs = 15000; // Save every 15 seconds when dirty
 
     /**
      * Initialize a new map or load existing data
@@ -435,5 +442,48 @@ export class MapDataManager {
                 visible: true
             }
         };
+    }
+
+    /**
+     * Update just the orientation and save immediately (quick update)
+     */
+    static async updateOrientation(mapKey: string, orientation: HexOrientation): Promise<boolean> {
+        try {
+            console.log(`[MapDataManager] Updating orientation to ${orientation} for map ${mapKey}`);
+
+            // Load current map data from file
+            const result = await this.loadMapData(mapKey);
+            if (!result.success || !result.data) {
+                console.error(`[MapDataManager] Failed to load map data for orientation update: ${mapKey}`);
+                return false;
+            }
+
+            // Update the orientation and timestamp
+            result.data.orientation = orientation;
+            result.data.lastUpdated = new Date().toISOString();
+
+            // Set as current map data temporarily for saving
+            const previousMapData = this.currentMapData;
+            this.currentMapData = result.data;
+
+            // Save immediately
+            const saveResult = await this.saveMapData(mapKey);
+
+            // Restore previous map data if it was different
+            if (previousMapData && previousMapData.mapKey !== mapKey) {
+                this.currentMapData = previousMapData;
+            }
+
+            if (saveResult.success) {
+                console.log(`[MapDataManager] ✅ Orientation updated and saved for map ${mapKey}`);
+                return true;
+            } else {
+                console.error(`[MapDataManager] Failed to save orientation update: ${saveResult.message}`);
+                return false;
+            }
+        } catch (error) {
+            console.error(`[MapDataManager] Error updating orientation:`, error);
+            return false;
+        }
     }
 }

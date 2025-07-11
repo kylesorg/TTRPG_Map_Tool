@@ -10,6 +10,7 @@ export function generateTestHexGrid(
     gridCols: number,
     orientation: HexOrientation = 'flat-top'
 ): HexTileData[] {
+    // Grid generation - only log errors, not regular operation
     if (orientation === 'flat-top') {
         return generateFlatTopGrid(gridRows, gridCols);
     } else {
@@ -20,19 +21,19 @@ export function generateTestHexGrid(
 // Generates a flat-top hex grid (original logic)
 function generateFlatTopGrid(gridRows: number, gridCols: number): HexTileData[] {
     const hexes: HexTileData[] = [];
-    // userX: 0 at bottom, increases upwards to gridRows-1 (this is the vertical loop)
-    // userY: 0 at left, increases to the right to gridCols-1 (this is the horizontal loop)
+    // userX: 0 at left, increases to the right to gridCols-1 (horizontal loop)
+    // userY: 0 at bottom, increases upwards to gridRows-1 (vertical loop)
 
     // Calculate the r-offset to make userX=0,userY=0 map to q_axial=0, r_axial=0
     const r_axial_offset = -(gridRows - 1);
 
-    for (let userX = 0; userX < gridRows; userX++) {
-        for (let userY = 0; userY < gridCols; userY++) {
+    for (let userY = 0; userY < gridRows; userY++) {      // userY loops through ROWS (vertical)
+        for (let userX = 0; userX < gridCols; userX++) {  // userX loops through COLS (horizontal)
             // Convert user (X,Y) to visual offset coordinates (vCol, vRow_from_top)
             // vCol is equivalent to q in an even-q offset system
             // vRow_from_top is equivalent to r in an even-q offset system (before axial conversion)
-            const vCol = userY;
-            const vRow_from_top = (gridRows - 1) - userX;
+            const vCol = userX;  // userX is horizontal (left-right)
+            const vRow_from_top = (gridRows - 1) - userY;  // userY is vertical (bottom-top, flipped)
 
             // Convert visual even-q (vCol, vRow_from_top) to an intermediate axial (q', r')
             // q_axial = q_offset
@@ -57,8 +58,8 @@ function generateFlatTopGrid(gridRows: number, gridCols: number): HexTileData[] 
                 isTown: false,
                 notes: '',
                 encounters: [],
-                labelX: userY,  // userY is horizontal (left-right) so it should be X
-                labelY: userX,  // userX is vertical (up-down) so it should be Y
+                labelX: userX,  // userX is horizontal (left-right)
+                labelY: userY,  // userY is vertical (bottom-top)
             });
         }
     }

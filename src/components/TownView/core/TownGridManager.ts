@@ -63,7 +63,11 @@ export class TownGridManager {
             containerNode
         );
 
-        this.layerManager = new TownLayerManager(config.layers, this.containers, app);
+        this.layerManager = new TownLayerManager({
+            ...config.layers,
+            gridWidth: 0, // Will be updated when townData is set
+            gridHeight: 0 // Will be updated when townData is set
+        }, this.containers, app);
 
         // Initialize event handler
         const eventConfig: TownEventHandlerConfig = {
@@ -151,6 +155,13 @@ export class TownGridManager {
     updateTownData(townData: TownData): void {
         this.townData = townData;
         this.eventHandler.updateTownData(townData);
+
+        // Update layer manager config with grid dimensions
+        this.layerManager.updateConfig({
+            gridWidth: townData.gridDimensions.width,
+            gridHeight: townData.gridDimensions.height
+        });
+
         this.requestRender();
     }
 
@@ -189,6 +200,38 @@ export class TownGridManager {
      */
     async setBackgroundImage(imageUrl: string, scale: number = 1, offsetX: number = 0, offsetY: number = 0): Promise<void> {
         await this.layerManager.setBackgroundImage(imageUrl, scale, offsetX, offsetY);
+    }
+
+    /**
+     * Sets background image scale
+     */
+    setBackgroundImageScale(scale: number): void {
+        console.log('[TownGridManager] setBackgroundImageScale called:', scale);
+        this.layerManager.setBackgroundImageScale(scale);
+    }
+
+    /**
+     * Sets background image offset
+     */
+    setBackgroundImageOffset(offsetX: number, offsetY: number): void {
+        console.log('[TownGridManager] setBackgroundImageOffset called:', { offsetX, offsetY });
+        this.layerManager.setBackgroundImageOffset(offsetX, offsetY);
+    }
+
+    /**
+     * Sets background image visibility
+     */
+    setBackgroundImageVisibility(visible: boolean): void {
+        console.log('[TownGridManager] setBackgroundImageVisibility called:', visible);
+        this.layerManager.setBackgroundImageVisibility(visible);
+    }
+
+    /**
+     * Clears background image
+     */
+    clearBackgroundImage(): void {
+        console.log('[TownGridManager] clearBackgroundImage called');
+        this.layerManager.clearBackgroundImage();
     }
 
     /**

@@ -4,7 +4,7 @@ import './App.css';
 import HexGridWebGL from './components/WorldMap/HexGridWebGL';
 import HexDetailPanel from './components/WorldMap/HexDetailPanel';
 import WorldMapTools from './components/WorldMap/WorldMapTools';
-import type { HexTile, Biome, ToolMode, TownMaterial, DrawingPath, DrawingType } from './types/mapTypes';
+import type { HexTile, Biome, ToolMode, TownMaterial, DrawingPath } from './types/mapTypes';
 import type { TownData, TownSizeCategory, TownCellCoordinates, TownCell, SelectedTownCell, TownSticker } from './types/townTypes';
 import { TOWN_SIZE_DETAILS } from './types/townTypes';
 import TownGridWebGLV2 from './components/TownView/TownGridWebGLV2';
@@ -13,9 +13,10 @@ import TownMaterialSelector from './components/TownView/TownMaterialSelector';
 import TownImageTools from './components/TownView/TownImageTools';
 import { generateTestHexGrid, getInitialCenterHexId } from './utils/gridHelpers';
 import { GRID_ROWS, GRID_COLS, UNASSIGNED_BIOME, setAllBiomes as setGlobalBiomes } from './utils/constants';
-import { userToAxial, type HexOrientation } from './utils/hexMath';
+import { userToAxial, axialToUserCoordinates, type HexOrientation } from './utils/hexMath';
 import { MapDataManager, type ComprehensiveMapData } from './utils/mapDataManager';
 import { generateUniqueMapKey, isDefaultKey } from './utils/mapKeyGenerator';
+import { GeographyImageManager, type GeographyImageData } from './utils/geographyImageManager';
 
 function App() {
   const [hexGrid, setHexGrid] = useState<Map<string, HexTile>>(() => new Map());
@@ -33,7 +34,9 @@ function App() {
   const [availableBiomes, setAvailableBiomes] = useState<Biome[]>([UNASSIGNED_BIOME]);
   const defaultHexInitiallySetRef = useRef(false);
   const currentSelectedBiomeRef = useRef<Biome>(UNASSIGNED_BIOME);
+  const hexGridRef = useRef<{ cleanupDrawingState: () => void } | null>(null);
   const [drawingLayer, setDrawingLayer] = useState<DrawingPath[]>([]);
+  const [geographyImage, setGeographyImage] = useState<GeographyImageData | null>(null);
 
   const [viewSettings, setViewSettings] = useState({
     showTownNames: true,
@@ -66,9 +69,20 @@ function App() {
   }, []);
 
   // Geography tool state
-  const [brushSize, setBrushSize] = useState(3.125); // Default to medium brush size
+  const [brushSize, setBrushSizeState] = useState(3.125); // Default to medium brush size
   const [brushColor, setBrushColor] = useState('#000000'); // Default to black
   const [isErasing, setIsErasing] = useState(false);
+
+  // Wrapper function for setBrushSize with logging
+  const setBrushSize = (size: number) => {
+    console.log(`[App] Setting brush size from ${brushSize} to ${size}`);
+    setBrushSizeState(size);
+  };
+
+  // Log brush size changes
+  useEffect(() => {
+    console.log(`[App] Brush size changed to: ${brushSize}`);
+  }, [brushSize]);
 
   // New layer visibility and opacity state
   const [gridLinesVisible, setGridLinesVisible] = useState(true);
@@ -290,10 +304,8 @@ function App() {
   };
 
   const handleNewPath = useCallback((newPath: DrawingPath) => {
-    console.log('App.tsx: handleNewPath called with:', newPath);
     setDrawingLayer(prev => {
       const newLayer = [...prev, newPath];
-      console.log('App.tsx: Updated drawingLayer state:', newLayer);
       return newLayer;
     });
   }, []);
@@ -322,7 +334,6 @@ function App() {
             if (currentSegment.length > 1) {
               newSegments.push({
                 id: `${path.id}_seg_${newSegments.length}`,
-                type: path.type,
                 points: [...currentSegment],
                 color: path.color,
                 strokeWidth: path.strokeWidth
@@ -337,7 +348,6 @@ function App() {
         if (currentSegment.length > 1) {
           newSegments.push({
             id: `${path.id}_seg_${newSegments.length}`,
-            type: path.type,
             points: [...currentSegment],
             color: path.color,
             strokeWidth: path.strokeWidth
@@ -349,7 +359,7 @@ function App() {
       });
 
       if (pathsModified > 0) {
-        console.log('App.tsx: Erased', pathsModified, 'path segments');
+        console.log(`[App] Erased ${pathsModified} path points`);
       }
 
       return updatedPaths;
@@ -357,8 +367,30 @@ function App() {
   }, []);
 
   const handleToolChange = useCallback((tool: ToolMode) => {
+    // Clean up any ongoing drawing state when switching tools
+    if (hexGridRef.current) {
+      hexGridRef.current.cleanupDrawingState();
+    }
     setCurrentTool(tool);
   }, []);
+
+  const handleHexOrientationChange = useCallback(async (newOrientation: HexOrientation) => {
+    setHexOrientation(newOrientation);
+
+    // After orientation change, reload geography image if it exists
+    if (currentMapKey && currentMapKey !== 'default_map') {
+      try {
+        const geographyManager = new GeographyImageManager();
+        const savedImage = await geographyManager.loadGeographyImage(currentMapKey);
+        if (savedImage) {
+          console.log(`[App] Reloaded geography image after orientation change: ${currentMapKey}`);
+          setGeographyImage(savedImage);
+        }
+      } catch (error) {
+        console.error('[App] Failed to reload geography image after orientation change:', error);
+      }
+    }
+  }, [hexOrientation, currentMapKey]);
 
   const handleSelectTownCell = useCallback((cell: SelectedTownCell | null) => {
     setSelectedTownCell(cell);
@@ -431,6 +463,12 @@ function App() {
     setTownBackgroundImageUrl(imageUrl);
   }, []);
 
+  const handleWorldMapBackgroundImageUpdate = useCallback((imageUrl: string | null) => {
+    console.log('[App] handleWorldMapBackgroundImageUpdate called with:', imageUrl);
+    setBackgroundImageUrl(imageUrl);
+    console.log('[App] backgroundImageUrl state updated');
+  }, []);
+
   // Map data management functions
   const handleLoadMap = useCallback(async (mapKey: string): Promise<boolean> => {
     try {
@@ -450,18 +488,48 @@ function App() {
       // Update all app state with loaded data
       setCurrentMapKey(mapKey);
 
-      // Update hex grid
+      // Update biomes FIRST before processing hexes
+      let loadedBiomes = [UNASSIGNED_BIOME]; // Default to unassigned biome
+      if (mapData.biomes) {
+        const biomes = Object.values(mapData.biomes);
+        setAvailableBiomes(biomes);
+        setGlobalBiomes(biomes.filter(b => b.name !== UNASSIGNED_BIOME.name));
+        loadedBiomes = biomes; // Use the loaded biomes for hex processing
+      } else {
+        // If no biomes in save data, keep current available biomes
+        loadedBiomes = availableBiomes;
+      }
+
+      // Update hex grid AFTER biomes are loaded
       if (mapData.worldMap?.hexes) {
         const hexMap = new Map<string, HexTile>();
+        let loadedHexCount = 0;
+        let hexesWithData = 0;
+
         Object.entries(mapData.worldMap.hexes).forEach(([hexId, hexData]) => {
-          // Find the biome object from available biomes
-          const biomeObj = availableBiomes.find(b => b.name === hexData.biome) || UNASSIGNED_BIOME;
+          // Find the biome object from the loaded biomes
+          const biomeObj = loadedBiomes.find(b => b.name === hexData.biome) || UNASSIGNED_BIOME;
           const originalBiomeObj = hexData.originalBiome ?
-            availableBiomes.find(b => b.name === hexData.originalBiome) : undefined;
+            loadedBiomes.find(b => b.name === hexData.originalBiome) : undefined;
+
+          // Convert axial coordinates to user coordinates for the current orientation
+          const userCoords = axialToUserCoordinates(
+            hexData.coordinates.q,
+            hexData.coordinates.r,
+            GRID_ROWS,
+            GRID_COLS,
+            hexOrientation // Use current orientation
+          );
+
+          if (!userCoords) {
+            console.warn(`[App] Could not convert axial coordinates to user coordinates for hex ${hexId}:`, hexData.coordinates);
+          }
 
           const hex: HexTile = {
             id: hexId,
             coordinates: hexData.coordinates,
+            labelX: userCoords?.labelX ?? -1, // Add user coordinates
+            labelY: userCoords?.labelY ?? -1,
             biome: biomeObj,
             originalBiome: originalBiomeObj,
             encounters: [], // Initialize with empty encounters
@@ -469,19 +537,23 @@ function App() {
             encounterNotes: hexData.encounterNotes || '',
             isTown: hexData.isTown || false,
             townName: hexData.townName,
-            townSize: hexData.townSize as any
+            townSize: hexData.townSize as any,
+            townId: hexData.townId || (hexData.isTown ? `town_${hexId}` : undefined) // Migrate missing townId
           };
+
+          // Check if this hex has non-default data
+          const hasNonDefaultData = hex.biome.name !== 'Unassigned' || hex.isTown || hex.notes.trim() !== '' || hex.encounters.length > 0;
+          if (hasNonDefaultData) {
+            hexesWithData++;
+          }
+
           hexMap.set(hexId, hex);
+          loadedHexCount++;
         });
+
+        console.log(`[App] Map loading: ${loadedHexCount} hexes loaded, ${hexesWithData} with non-default data`);
         setHexGrid(hexMap);
         setHexGridVersion(prev => prev + 1);
-      }
-
-      // Update biomes
-      if (mapData.biomes) {
-        const biomes = Object.values(mapData.biomes);
-        setAvailableBiomes(biomes);
-        setGlobalBiomes(biomes.filter(b => b.name !== UNASSIGNED_BIOME.name));
       }
 
       // Update town data (simplified - skip for now due to type complexity)
@@ -493,11 +565,26 @@ function App() {
       // Update background image
       if (mapData.worldMap?.backgroundImage) {
         const bgImg = mapData.worldMap.backgroundImage;
-        setBackgroundImageUrl(`/map_data/map_${mapKey}/${bgImg.filename}`);
+        const imageUrl = `/map_data/map_${mapKey}/${bgImg.filename}`;
+        // Background image found and loading
+        setBackgroundImageUrl(imageUrl);
         setBackgroundImageScale(bgImg.scale);
         setBackgroundImageOffsetX(bgImg.offsetX);
         setBackgroundImageOffsetY(bgImg.offsetY);
         setBackgroundImageVisible(bgImg.visible);
+      } else {
+        // No background image in map data
+        setBackgroundImageUrl(null);
+      }
+
+      // Update view settings
+      if (mapData.worldMap?.viewSettings) {
+        const vs = mapData.worldMap.viewSettings;
+        setGridLinesVisible(vs.gridLinesVisible);
+        setGridLineThickness(vs.gridLineThickness);
+        setGridLineColor(vs.gridLineColor);
+        setTextScale(vs.textScale);
+        setViewSettings(prev => ({ ...prev, showTownNames: vs.showTownNames }));
       }
 
       // Update geography layer
@@ -505,12 +592,30 @@ function App() {
         // Convert geography layers to drawing paths format
         const paths: DrawingPath[] = mapData.geography.layers.map(layer => ({
           id: layer.id,
-          type: 'road' as DrawingType,
           points: layer.coordinates,
           color: layer.style.color,
           strokeWidth: layer.style.strokeWidth
         }));
         setDrawingLayer(paths);
+        setGeographyImage(null); // Clear any existing image since we have paths
+      } else {
+        // No drawing paths, but check for saved geography image
+        try {
+          const geographyManager = new GeographyImageManager();
+          const savedImage = await geographyManager.loadGeographyImage(mapKey);
+          if (savedImage) {
+            console.log(`[App] Loaded geography image for map: ${mapKey}`);
+            setGeographyImage(savedImage);
+            setDrawingLayer([]); // Clear drawing layer since we have an image
+          } else {
+            setGeographyImage(null);
+            setDrawingLayer([]);
+          }
+        } catch (error) {
+          console.error('[App] Failed to load geography image:', error);
+          setGeographyImage(null);
+          setDrawingLayer([]);
+        }
       }
 
       // Update hex orientation
@@ -541,7 +646,7 @@ function App() {
     }
 
     const saveStartTime = performance.now();
-    console.log('💾 Starting map save process...', { mapKey: currentMapKey, hexCount: hexGrid.size });
+    console.log('💾 Saving map:', currentMapKey);
 
     try {
       setIsSaving(true);
@@ -549,10 +654,9 @@ function App() {
       // Ensure we have a valid, non-default map key
       let saveMapKey = currentMapKey;
       let isNewMap = false;
-      console.log(`🔍 Save process: mapKey=${saveMapKey}, isDefaultKey=${isDefaultKey(currentMapKey)}`);
 
       if (isDefaultKey(currentMapKey)) {
-        console.log('🔑 Generating new unique map key for first save...');
+        console.log('🔑 Generating new unique map key...');
         const keyGenStart = performance.now();
         saveMapKey = await generateUniqueMapKey();
         console.log(`✅ Generated new map key: ${saveMapKey} (${(performance.now() - keyGenStart).toFixed(2)}ms)`);
@@ -561,26 +665,60 @@ function App() {
       }
 
       // Initialize map data manager with the save key
-      const initStart = performance.now();
       await MapDataManager.initializeMap(saveMapKey, isNewMap);
-      console.log(`📁 Map data manager initialized (${(performance.now() - initStart).toFixed(2)}ms)`);
 
-      // Compile comprehensive map data in the expected format
-      const compileStart = performance.now();
-      const hexesData: Record<string, any> = {};
-      hexGrid.forEach((hex, hexId) => {
-        hexesData[hexId] = {
-          coordinates: hex.coordinates,
-          biome: hex.biome.name,
-          originalBiome: hex.originalBiome?.name,
-          notes: hex.notes,
-          encounterNotes: hex.encounterNotes,
-          isTown: hex.isTown,
-          townName: hex.townName,
-          townSize: hex.townSize
-        };
-      });
+      // Log background image info during save
+      if (backgroundImageUrl) {
+        console.log('🖼️ Saving world background image:', {
+          url: backgroundImageUrl,
+          filename: backgroundImageUrl.split('/').pop() || '',
+          scale: backgroundImageScale,
+          visible: backgroundImageVisible,
+          offsetX: backgroundImageOffsetX,
+          offsetY: backgroundImageOffsetY
+        });
+      } else {
+        console.log('🖼️ No world background image to save');
+      }
 
+      // Log geography image info during save
+      if (geographyImage) {
+        console.log('🗺️ Saving geography image:', {
+          size: { width: geographyImage.width, height: geographyImage.height },
+          scale: geographyImage.scale,
+          offset: { x: geographyImage.offsetX, y: geographyImage.offsetY }
+        });
+      } else if (drawingLayer.length > 0) {
+        console.log(`🗺️ Saving ${drawingLayer.length} geography drawing paths`);
+
+        // Convert drawing paths to PNG during auto-save for persistence
+        try {
+          const geographyManager = new GeographyImageManager();
+          const imageData = await geographyManager.pathsToImage(
+            drawingLayer,
+            4000, // Large canvas for good quality
+            4000,
+            'transparent'
+          );
+
+          // Save the geography image to file
+          const saveSuccess = await geographyManager.saveGeographyImage(saveMapKey, imageData);
+          if (saveSuccess) {
+            console.log(`🗺️ Geography paths converted to PNG and saved for map: ${saveMapKey}`);
+            // Update the geography image state for immediate display
+            setGeographyImage(imageData);
+          } else {
+            console.warn(`🗺️ Failed to save geography PNG for map: ${saveMapKey}`);
+          }
+
+        } catch (error) {
+          console.error('🗺️ Failed to convert geography paths to PNG during save:', error);
+        }
+      } else {
+        console.log('🗺️ No geography data to save');
+      }
+
+      // Prepare biomes data first (as requested for structure)
       const biomesData: Record<string, any> = {};
       availableBiomes.forEach(biome => {
         biomesData[biome.name] = biome;
@@ -596,12 +734,31 @@ function App() {
         townsData[townId] = town;
       });
 
+      // For the main save (first save or manual save), save ALL hexes with complete data
+      const hexesData: Record<string, any> = {};
+      hexGrid.forEach((hex, hexId) => {
+        hexesData[hexId] = {
+          coordinates: hex.coordinates,
+          biome: hex.biome.name,
+          originalBiome: hex.originalBiome?.name,
+          notes: hex.notes,
+          encounterNotes: hex.encounterNotes,
+          isTown: hex.isTown,
+          townName: hex.townName,
+          townSize: hex.townSize,
+          townId: hex.townId // Add townId to save data
+        };
+      });
+
       const mapData: ComprehensiveMapData = {
         mapKey: saveMapKey,
         version: '2.0.0',
         lastUpdated: new Date().toISOString(),
         createdDate: new Date().toISOString(),
         orientation: hexOrientation,
+        // Restructured: biomes first as requested
+        biomes: biomesData,
+        townMaterials: townMaterialsData,
         worldMap: {
           name: `Map ${saveMapKey}`,
           backgroundImage: backgroundImageUrl ? {
@@ -611,10 +768,16 @@ function App() {
             offsetY: backgroundImageOffsetY,
             visible: backgroundImageVisible
           } : undefined,
-          hexes: hexesData
+          hexes: hexesData,
+          // Include view settings that were missing
+          viewSettings: {
+            gridLinesVisible,
+            gridLineThickness,
+            gridLineColor,
+            textScale,
+            showTownNames: viewSettings.showTownNames
+          }
         },
-        biomes: biomesData,
-        townMaterials: townMaterialsData,
         towns: townsData,
         geography: {
           layers: drawingLayer.map(path => ({
@@ -630,25 +793,17 @@ function App() {
           visible: geographyVisible
         }
       };
-      console.log(`📊 Map data compiled (${(performance.now() - compileStart).toFixed(2)}ms)`, {
-        hexes: Object.keys(hexesData).length,
-        biomes: Object.keys(biomesData).length,
-        towns: Object.keys(townsData).length
-      });
+      console.log(`📊 Map data compiled - hexes: ${Object.keys(hexesData).length}, biomes: ${Object.keys(biomesData).length}, geography paths: ${drawingLayer.length}`);
 
       // Update the map data in the manager
-      const updateStart = performance.now();
       MapDataManager.updateMapData(mapData);
-      console.log(`🔄 Map data updated in manager (${(performance.now() - updateStart).toFixed(2)}ms)`);
 
       // Force save
-      const saveApiStart = performance.now();
       const success = await MapDataManager.forceSave();
-      console.log(`📤 API save completed (${(performance.now() - saveApiStart).toFixed(2)}ms)`);
 
       if (success) {
         const totalTime = performance.now() - saveStartTime;
-        console.log(`✅ Map saved successfully: ${saveMapKey} (Total: ${totalTime.toFixed(2)}ms)`);
+        console.log(`✅ Map saved successfully: ${saveMapKey} (${totalTime.toFixed(2)}ms)`);
         setHasUnsavedChanges(false);
         setHasUserMadeEdits(false); // Reset edit tracking after successful save
         return true;
@@ -680,12 +835,9 @@ function App() {
       setIsSaving(true);
 
       // Initialize map data manager with the save key
-      const initStart = performance.now();
       await MapDataManager.initializeMap(mapKey, isNewMap);
-      console.log(`📁 Map data manager initialized (${(performance.now() - initStart).toFixed(2)}ms)`);
 
       // Compile comprehensive map data in the expected format
-      const compileStart = performance.now();
       const hexesData: Record<string, any> = {};
       hexGrid.forEach((hex, hexId) => {
         hexesData[hexId] = {
@@ -696,7 +848,8 @@ function App() {
           encounterNotes: hex.encounterNotes,
           isTown: hex.isTown,
           townName: hex.townName,
-          townSize: hex.townSize
+          townSize: hex.townSize,
+          townId: hex.townId // Add townId to save data
         };
       });
 
@@ -730,6 +883,13 @@ function App() {
             offsetY: backgroundImageOffsetY,
             visible: backgroundImageVisible
           } : undefined,
+          viewSettings: {
+            gridLinesVisible,
+            gridLineThickness,
+            gridLineColor,
+            textScale,
+            showTownNames: viewSettings.showTownNames
+          },
           hexes: hexesData
         },
         biomes: biomesData,
@@ -749,25 +909,14 @@ function App() {
           visible: geographyVisible
         }
       };
-      console.log(`📊 Map data compiled (${(performance.now() - compileStart).toFixed(2)}ms)`, {
-        hexes: Object.keys(hexesData).length,
-        biomes: Object.keys(biomesData).length,
-        towns: Object.keys(townsData).length
-      });
 
-      // Update the map data in the manager
-      const updateStart = performance.now();
+      // Update the map data in the manager and save
       MapDataManager.updateMapData(mapData);
-      console.log(`🔄 Map data updated in manager (${(performance.now() - updateStart).toFixed(2)}ms)`);
-
-      // Force save
-      const saveApiStart = performance.now();
       const success = await MapDataManager.forceSave();
-      console.log(`📤 API save completed (${(performance.now() - saveApiStart).toFixed(2)}ms)`);
 
       if (success) {
         const totalTime = performance.now() - saveStartTime;
-        console.log(`✅ Map saved successfully: ${mapKey} (Total: ${totalTime.toFixed(2)}ms)`);
+        console.log(`✅ Map saved successfully: ${mapKey} (${totalTime.toFixed(2)}ms)`);
         return true;
       } else {
         console.error('❌ Failed to save map');
@@ -808,27 +957,24 @@ function App() {
     setHasUnsavedChanges(false);
     setHexGridVersion(prev => prev + 1);
 
-    // Reload default biomes from biomes.json
-    try {
-      const response = await fetch('/biomes.json');
-      const defaultBiomesData: Biome[] = await response.json();
-      const allDefaultBiomes = [UNASSIGNED_BIOME, ...defaultBiomesData].sort((a, b) => a.name.localeCompare(b.name));
-      setAvailableBiomes(allDefaultBiomes);
-      setGlobalBiomes(defaultBiomesData);
-
-      // Reset selected biome to unassigned
-      setCurrentSelectedBiome(UNASSIGNED_BIOME);
-
-      console.log('🔄 Default biomes reloaded for new map');
-    } catch (error) {
-      console.error('Failed to reload default biomes:', error);
-    }
+    // Reset selected biome to unassigned (biomes are already loaded on app startup)
+    setCurrentSelectedBiome(UNASSIGNED_BIOME);
 
     // Regenerate the initial hex grid
     const initialHexArray = generateTestHexGrid(GRID_ROWS, GRID_COLS, hexOrientation);
     const initialHexMap = new Map<string, HexTile>();
     initialHexArray.forEach(hex => initialHexMap.set(hex.id, hex));
     setHexGrid(initialHexMap);
+
+    // Center the viewport on the default center hex and select it
+    const centerHexId = getInitialCenterHexId(GRID_ROWS, GRID_COLS, hexOrientation);
+    const centerHex = initialHexMap.get(centerHexId);
+    if (centerHex) {
+      setSelectedHex(centerHex);
+      setCenterOnHexId(centerHexId);
+      setIsDetailsPanelOpen(true);
+      console.log('🎯 Centered viewport on hex:', centerHexId);
+    }
 
     // Mark initial load as complete after a brief delay
     setTimeout(() => {
@@ -889,7 +1035,11 @@ function App() {
         // Mark initial load as complete after grid generation
         setTimeout(() => {
           setIsInitialLoad(false);
-          console.log('🚀 Initial load complete - auto-save and unsaved change tracking now enabled');
+          // Only log once per session
+          if (!(window as any).initialLoadLogged) {
+            (window as any).initialLoadLogged = true;
+            console.log('🚀 Initial load complete - auto-save and unsaved change tracking now enabled');
+          }
         }, 100);
       })
       .catch(error => console.error("Could not load biomes:", error));
@@ -1123,33 +1273,76 @@ function App() {
     }
   }, [hexGrid, activeTownId]);
 
-  const handleRenameTown = useCallback((townId: string, newName: string) => {
-    // Find the hex that corresponds to this town
-    const townHex = Array.from(hexGrid.values()).find(hex => hex.townId === townId);
-    if (!townHex) return;
+  const handleRenameTown = useCallback((hexId: string, newName: string) => {
+    // Find the hex that corresponds to this town by hex ID
+    const townHex = hexGrid.get(hexId);
+    if (!townHex || !townHex.isTown || !townHex.townId) return;
 
     // Update the hex grid with the new town name
     setHexGrid(prevGrid => {
       const newGrid = new Map(prevGrid);
       const updatedHex = { ...townHex, townName: newName };
-      newGrid.set(townHex.id, updatedHex);
+      newGrid.set(hexId, updatedHex);
+
+      // Update selectedHex if it's the same hex
+      if (selectedHex?.id === hexId) {
+        setSelectedHex(updatedHex);
+      }
+
       return newGrid;
     });
 
     // Update the town data as well
-    setTowns(prevTowns => {
-      const newTowns = new Map(prevTowns);
-      const townData = newTowns.get(townId);
-      if (townData) {
-        const updatedTownData = { ...townData, name: newName };
-        newTowns.set(townId, updatedTownData);
-      }
-      return newTowns;
-    });
+    if (townHex.townId) {
+      setTowns(prevTowns => {
+        const newTowns = new Map(prevTowns);
+        const townData = newTowns.get(townHex.townId!);
+        if (townData) {
+          const updatedTownData = { ...townData, name: newName };
+          newTowns.set(townHex.townId!, updatedTownData);
+        }
+        return newTowns;
+      });
+    }
 
     // Force a re-render
     setHexGridVersion(prev => prev + 1);
+  }, [hexGrid, selectedHex]);
+
+  // Debug function to check hex data at specific coordinates
+  const debugHexAtCoordinates = useCallback((x: number, y: number) => {
+    console.log(`[App] Debugging hex at user coordinates (${x}, ${y}):`);
+
+    const targetHex = Array.from(hexGrid.values()).find(hex =>
+      hex.labelX === x && hex.labelY === y
+    );
+
+    if (targetHex) {
+      console.log(`[App] Found hex:`, {
+        id: targetHex.id,
+        labelX: targetHex.labelX,
+        labelY: targetHex.labelY,
+        axialCoords: targetHex.coordinates,
+        biome: targetHex.biome.name,
+        isTown: targetHex.isTown,
+        notes: targetHex.notes,
+        encounters: targetHex.encounters.length,
+        hasNonDefaultData: targetHex.biome.name !== 'Unassigned' || targetHex.isTown || targetHex.notes.trim() !== '' || targetHex.encounters.length > 0
+      });
+    } else {
+      console.log(`[App] No hex found at coordinates (${x}, ${y})`);
+      console.log('[App] Available hex coordinates sample:',
+        Array.from(hexGrid.values()).slice(0, 5).map(h => ({ labelX: h.labelX, labelY: h.labelY, id: h.id }))
+      );
+    }
+
+    return targetHex;
   }, [hexGrid]);
+
+  // Expose debug function globally for easy testing
+  useEffect(() => {
+    (window as any).debugHex = debugHexAtCoordinates;
+  }, [debugHexAtCoordinates]);
 
   // Mark as unsaved on any relevant change (but not during initial load)
   useEffect(() => {
@@ -1158,14 +1351,15 @@ function App() {
       setHasUserMadeEdits(true); // User has made actual edits
     }
     // eslint-disable-next-line
-  }, [hexGrid, towns, availableBiomes, drawingLayer, backgroundImageUrl, currentMapKey]);
+  }, [hexGrid, towns, availableBiomes, drawingLayer, backgroundImageUrl, currentMapKey,
+    viewSettings, gridLinesVisible, gridLineThickness, gridLineColor, textScale, geographyVisible]);
 
   const hexListForGrid = useMemo(() => {
     const hexArray = Array.from(hexGrid.values());
     // console.log('[App] Creating hexListForGrid, count:', hexArray.length, 'hexGrid.size:', hexGrid.size, 'version:', hexGridVersion);
     return hexArray;
   }, [hexGrid, hexGridVersion]);
-  const townListForTools = useMemo(() => Array.from(hexGrid.values()).filter(hex => hex.isTown), [hexGrid]);
+  const townListForTools = useMemo(() => Array.from(hexGrid.values()).filter(hex => hex.isTown), [hexGrid, hexGridVersion]);
 
   // Keep the ref in sync with the state
   useEffect(() => {
@@ -1189,8 +1383,13 @@ function App() {
       // Create a map of user coordinates to hex data to preserve biome assignments
       const existingHexData = new Map<string, { biome: Biome; isTown: boolean; notes: string; encounters: any[] }>();
       if (hexGrid.size > 0) {
+        let hexesWithData = 0;
         Array.from(hexGrid.values()).forEach(hex => {
           const coordKey = `${hex.labelX},${hex.labelY}`;
+          const hasNonDefaultData = hex.biome.name !== 'Unassigned' || hex.isTown || hex.notes.trim() !== '' || hex.encounters.length > 0;
+          if (hasNonDefaultData) {
+            hexesWithData++;
+          }
           existingHexData.set(coordKey, {
             biome: hex.biome,
             isTown: hex.isTown,
@@ -1198,13 +1397,16 @@ function App() {
             encounters: hex.encounters
           });
         });
-
+        // Only log if there's significant data to preserve
+        if (hexesWithData > 0) {
+          console.log(`[App] Preserving hex data for orientation change: ${hexesWithData} hexes with data`);
+        }
       }
 
       const newHexArray = generateTestHexGrid(GRID_ROWS, GRID_COLS, hexOrientation);
-      const newHexMap = new Map<string, HexTile>();
-
-      // Restore hex data based on user coordinates
+      const newHexMap = new Map<string, HexTile>();      // Restore hex data based on user coordinates
+      let hexesRestored = 0;
+      let hexesWithDataRestored = 0;
       newHexArray.forEach(hex => {
         const coordKey = `${hex.labelX},${hex.labelY}`;
         const existingData = existingHexData.get(coordKey);
@@ -1214,9 +1416,20 @@ function App() {
           hex.isTown = existingData.isTown;
           hex.notes = existingData.notes;
           hex.encounters = existingData.encounters;
+          hexesRestored++;
+
+          const hasNonDefaultData = hex.biome.name !== 'Unassigned' || hex.isTown || hex.notes.trim() !== '' || hex.encounters.length > 0;
+          if (hasNonDefaultData) {
+            hexesWithDataRestored++;
+          }
         }
         newHexMap.set(hex.id, hex);
       });
+
+      // Only log data restoration if there was significant data
+      if (hexesWithDataRestored > 0) {
+        console.log(`[App] Orientation change: ${hexesWithDataRestored} hexes with data restored`);
+      }
 
       setHexGrid(newHexMap);
       setHexGridVersion(prev => prev + 1);
@@ -1252,23 +1465,34 @@ function App() {
       }
 
       // Mark orientation change as complete after a brief delay
-      setTimeout(() => {
+      setTimeout(async () => {
         setIsInitialLoad(false);
         console.log('🚀 Orientation change complete - auto-save and unsaved change tracking now enabled');
+
+        // Auto-save orientation change immediately (skip for default map)
+        if (currentMapKey && currentMapKey.trim() !== '' && !isDefaultKey(currentMapKey)) {
+          console.log(`[App] Auto-saving orientation change (${hexOrientation}) for map: ${currentMapKey}`);
+          const orientationSaveSuccess = await MapDataManager.updateOrientation(currentMapKey, hexOrientation);
+          if (orientationSaveSuccess) {
+            console.log('✅ Orientation auto-saved successfully');
+          } else {
+            console.warn('⚠️ Failed to auto-save orientation change');
+          }
+        } else if (isDefaultKey(currentMapKey)) {
+          console.log(`[App] Skipping orientation auto-save for default map: ${currentMapKey}`);
+        }
       }, 100);
     }
   }, [hexOrientation, biomesLoaded]);
 
   // Smart auto-save with batching and collision avoidance
   useEffect(() => {
+    // Determine auto-save delay based on map type
+    const autoSaveDelay = isDefaultKey(currentMapKey) ? 10000 : 15000; // 10s for default_map, 15s for others
+
     const autoSaveTimer = setTimeout(async () => {
       // Skip if currently saving or during initial load
       if (isSaving || isInitialLoad) {
-        if (isInitialLoad) {
-          console.log('⏳ Auto-save skipped - initial load in progress');
-        } else {
-          console.log('⏳ Auto-save skipped - save already in progress');
-        }
         return;
       }
 
@@ -1276,27 +1500,26 @@ function App() {
       if (hexGrid.size > 0 && hasUserMadeEdits) {
         if (isDefaultKey(currentMapKey)) {
           // For default keys, generate a new map key and save immediately
-          console.log('🆕 Changes detected on default map - generating new map key and saving...');
+          console.log('🆕 Auto-save: Creating new map...');
           try {
             const newMapKey = await generateUniqueMapKey();
 
             // Perform the save operation directly with the new key
-            console.log('💾 Starting immediate save for new map:', newMapKey);
             const saveSuccess = await handleSaveMapWithKey(newMapKey, true); // true = isNewMap
 
             if (saveSuccess) {
               setCurrentMapKey(newMapKey);
               setHasUnsavedChanges(false);
               setHasUserMadeEdits(false);
-              console.log(`✅ New map saved and key updated: ${newMapKey}`);
+              console.log(`✅ Auto-save: New map created: ${newMapKey}`);
             }
           } catch (error) {
-            console.error('❌ Failed to generate new map key and save:', error);
+            console.error('❌ Auto-save failed:', error);
             setHasUnsavedChanges(true);
           }
         } else if (hasUnsavedChanges) {
           // For non-default keys with changes, trigger auto-save
-          console.log('💾 Auto-save triggered for existing map:', currentMapKey);
+          console.log('💾 Auto-save: Saving existing map...');
           try {
             await handleSaveMap();
           } catch (error) {
@@ -1304,10 +1527,11 @@ function App() {
           }
         }
       }
-    }, 3000); // 3-second debounce for auto-save
+    }, autoSaveDelay);
 
     return () => clearTimeout(autoSaveTimer);
-  }, [hexGrid, towns, availableBiomes, drawingLayer, backgroundImageUrl, currentMapKey, hasUnsavedChanges, isSaving, isInitialLoad, hasUserMadeEdits, handleSaveMap, handleSaveMapWithKey]);
+  }, [hexGrid, towns, availableBiomes, drawingLayer, backgroundImageUrl, currentMapKey, hasUnsavedChanges, isSaving, isInitialLoad, hasUserMadeEdits, handleSaveMap, handleSaveMapWithKey,
+    viewSettings, gridLinesVisible, gridLineThickness, gridLineColor, textScale, geographyVisible]);
 
   // Remove the old periodic save - we now have smart batching in the main auto-save
 
@@ -1406,10 +1630,13 @@ function App() {
                     onMaterialColorChange={handleTownMaterialColorChange}
                   />
                 )}
-                <div className="tool-section">
-                  <p>Zoom: {townViewDisplay.zoom.toFixed(2)}x</p>
-                  <p>Rendered Cells: {townViewDisplay.visibleCells}</p>
-                </div>
+                {/* @ts-ignore - activeTab can be 'view' in town context */}
+                {activeTab === 'view' && (
+                  <div className="tool-section">
+                    <p>Zoom: {townViewDisplay.zoom.toFixed(2)}x</p>
+                    <p>Rendered Cells: {townViewDisplay.visibleCells}</p>
+                  </div>
+                )}
               </>
             )}
             {activeTab === 'view' && (
@@ -1436,10 +1663,6 @@ function App() {
                   backgroundImageOffsetY={townBackgroundImageOffsetY}
                   setBackgroundImageOffsetY={setTownBackgroundImageOffsetY}
                 />
-                <div className="tool-section">
-                  <p>Zoom: {townViewDisplay.zoom.toFixed(2)}x</p>
-                  <p>Rendered Cells: {townViewDisplay.visibleCells}</p>
-                </div>
               </>
             )}
             {activeTab === 'importExport' && (
@@ -1545,7 +1768,7 @@ function App() {
               onBiomeDelete={handleBiomeDelete}
               // Background image controls
               backgroundImageUrl={backgroundImageUrl}
-              setBackgroundImageUrl={setBackgroundImageUrl}
+              setBackgroundImageUrl={handleWorldMapBackgroundImageUpdate}
               backgroundImageScale={backgroundImageScale}
               setBackgroundImageScale={setBackgroundImageScale}
               backgroundImageOffsetX={backgroundImageOffsetX}
@@ -1556,7 +1779,7 @@ function App() {
               setBackgroundImageVisible={setBackgroundImageVisible}
               // Hex orientation controls (NEW - additive only)
               hexOrientation={hexOrientation}
-              setHexOrientation={setHexOrientation}
+              setHexOrientation={handleHexOrientationChange}
               // Map data management
               onLoadMap={handleLoadMap}
               onSaveMap={handleSaveMap}
@@ -1570,6 +1793,7 @@ function App() {
         <div className="map-view-container">
           {hexListForGrid.length > 0 && biomesLoaded && (
             <HexGridWebGL
+              ref={hexGridRef}
               hexTiles={hexListForGrid}
               onHexClick={handleHexClick}
               currentTool={currentTool}
@@ -1587,6 +1811,7 @@ function App() {
               brushSize={brushSize}
               brushColor={brushColor}
               isErasing={isErasing}
+              geographyImage={geographyImage}
               // New layer props
               gridLinesVisible={gridLinesVisible}
               gridLineThickness={gridLineThickness}

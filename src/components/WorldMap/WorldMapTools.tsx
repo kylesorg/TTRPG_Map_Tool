@@ -26,7 +26,7 @@ interface WorldMapToolsProps {
     towns: HexTile[]; // Add towns to props
     onJumpToTown: (hexId: string) => void; // Add jump handler to props
     onEnterTown: (townId: string) => void;
-    onRenameTown: (townId: string, newName: string) => void;
+    onRenameTown: (hexId: string, newName: string) => void;
     // Props for the new View tab
     viewSettings: {
         showTownNames: boolean;
@@ -525,32 +525,63 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
 
                     <h4 style={{ color: 'white' }}>Background Image</h4>
                     <div style={{ marginBottom: '10px' }}>
-                        <input
-                            ref={fileInputRef}
-                            type="file"
-                            accept="image/*"
-                            onChange={async (e) => {
-                                const file = e.target.files?.[0];
-                                if (file) {
-                                    try {
-                                        // Use current map key for upload
-                                        const mapKey = currentMapKey || 'default_map';
+                        {!backgroundImageUrl ? (
+                            <>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                            try {
+                                                let uploadMapKey = currentMapKey || 'default_map';
 
-                                        // Upload to server
-                                        const result = await BackgroundImageAPI.uploadBackgroundImage(file, mapKey, 'worldmap');
-                                        setBackgroundImageUrl(result.url);
-                                        console.log('✅ Background image uploaded successfully:', result);
-                                    } catch (error) {
-                                        console.error('❌ Upload failed:', error);
-                                        // You could add user-facing error handling here
-                                    }
-                                }
-                            }}
-                            style={{ width: '100%', marginBottom: '8px' }}
-                        />
-                        <small style={{ color: '#ccc', fontSize: '11px' }}>
-                            Supports: JPG, PNG, TIFF, and other image formats
-                        </small>
+                                                // If we're on the default map, we need to create a new map first
+                                                if (isDefaultKey(currentMapKey || 'default_map')) {
+                                                    console.log('🔑 Background image upload: Creating new map for default map...');
+                                                    if (onSaveMap) {
+                                                        await onSaveMap();
+                                                        // onSaveMap will update currentMapKey, so we need to wait and get the new key
+                                                        // The new key will be available in the next render cycle
+                                                        // For now, we'll use a small delay to ensure the save completes
+                                                        await new Promise(resolve => setTimeout(resolve, 100));
+                                                        uploadMapKey = currentMapKey || uploadMapKey;
+                                                        console.log('✅ New map created, using key:', uploadMapKey);
+                                                    }
+                                                }
+
+                                                // Upload to server with the (potentially new) map key
+                                                const result = await BackgroundImageAPI.uploadBackgroundImage(file, uploadMapKey, 'worldmap');
+                                                setBackgroundImageUrl(result.url);
+                                            } catch (error) {
+                                                console.error('❌ Upload failed:', error);
+                                            }
+                                        }
+                                    }}
+                                    style={{ width: '100%', marginBottom: '8px' }}
+                                />
+                                <small style={{ color: '#ccc', fontSize: '11px' }}>
+                                    Supports: JPG, PNG, TIFF, and other image formats
+                                </small>
+                            </>
+                        ) : (
+                            <button
+                                onClick={handleRemoveBackgroundImage}
+                                style={{
+                                    width: '100%',
+                                    padding: '8px',
+                                    backgroundColor: '#dc3545',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    marginBottom: '8px'
+                                }}
+                            >
+                                Remove Background Image
+                            </button>
+                        )}
                     </div>
 
                     {backgroundImageUrl && (
@@ -801,23 +832,6 @@ const WorldMapTools: React.FC<WorldMapToolsProps> = ({
                                     *Fine tuning can be manually done up to .00
                                 </small>
                             </div>
-
-                            <button
-                                onClick={handleRemoveBackgroundImage}
-                                style={{
-                                    width: '100%',
-                                    marginTop: '10px',
-                                    padding: '6px',
-                                    background: '#ff4444',
-                                    color: 'white',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    fontSize: '12px'
-                                }}
-                            >
-                                Remove Background Image
-                            </button>
                         </>
                     )}
                 </div>

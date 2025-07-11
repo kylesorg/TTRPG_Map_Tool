@@ -123,6 +123,8 @@ const TownGridWebGLV2: React.FC<TownGridWebGLV2Props> = ({
                             },
                             layers: {
                                 cellSize: CELL_SIZE,
+                                gridWidth: townData.gridDimensions.width,
+                                gridHeight: townData.gridDimensions.height,
                                 viewSettings: {
                                     showGridLines: showGridLines,
                                 },
@@ -227,6 +229,10 @@ const TownGridWebGLV2: React.FC<TownGridWebGLV2Props> = ({
                 ).catch(error => {
                     console.error('[TownGridWebGLV2] Failed to set background image:', error);
                 });
+
+                // Apply scale and offset separately to ensure they're applied
+                gridManagerRef.current.setBackgroundImageScale(backgroundImageScale);
+                gridManagerRef.current.setBackgroundImageOffset(backgroundImageOffsetX, backgroundImageOffsetY);
             } else {
                 gridManagerRef.current.setBackgroundImage('').catch(error => {
                     console.error('[TownGridWebGLV2] Failed to clear background image:', error);
@@ -263,6 +269,8 @@ const TownGridWebGLV2: React.FC<TownGridWebGLV2Props> = ({
             // Update layer configuration
             gridManager.getLayerManager().updateConfig({
                 cellSize: CELL_SIZE,
+                gridWidth: townData.gridDimensions.width,
+                gridHeight: townData.gridDimensions.height,
                 viewSettings: {
                     showGridLines: showGridLines,
                 },

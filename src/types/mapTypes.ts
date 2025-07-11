@@ -41,20 +41,11 @@ export interface DrawingPathPoint {
     y: number;
 }
 
-export type DrawingType = 'road' | 'river' | 'landmark';
-
 export interface DrawingPath {
     id: string;
-    type: DrawingType;
     points: { x: number; y: number }[];
     color?: string;
     strokeWidth?: number;
-}
-
-export interface DrawingSettings {
-    type: DrawingType;
-    color: string;
-    strokeWidth: number;
 }
 
 export interface HexTile {
@@ -77,8 +68,18 @@ export interface WorldMapData {
     id: string;
     name: string;
     hexes: Record<string, HexTile>; // Using a Record for easier lookup by hex ID
-    drawingLayer: DrawingPath[];
+    drawingLayer: DrawingPath[]; // Legacy: keep for backward compatibility
+    geographyImage?: GeographyImageData; // New: image-based geography
     // metadata like creationDate, lastModified, etc.
+}
+
+export interface GeographyImageData {
+    imageDataUrl: string; // Base64 PNG data
+    width: number;
+    height: number;
+    offsetX: number; // Position relative to hex grid
+    offsetY: number;
+    scale: number; // Scale factor for the image
 }
 
 export interface TownMaterial {
